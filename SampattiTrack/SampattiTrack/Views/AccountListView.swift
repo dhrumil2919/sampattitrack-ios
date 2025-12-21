@@ -55,6 +55,24 @@ struct AccountListView: View {
                              }
                              Spacer()
                          }
+                    } else if filteredAccounts.isEmpty {
+                        VStack(spacing: 12) {
+                            Spacer()
+                            Image(systemName: "magnifyingglass")
+                                .font(.largeTitle)
+                                .foregroundColor(.secondary)
+                            Text("No accounts found")
+                                .font(.headline)
+                            if !searchText.isEmpty {
+                                Text("No results for \"\(searchText)\"")
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text("You have no \(selectedCategory.rawValue.lowercased()) accounts.")
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding()
                     } else {
                         List {
                             ForEach(filteredAccounts) { account in
@@ -75,6 +93,7 @@ struct AccountListView: View {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         NavigationLink(destination: AddAccountView()) {
                             Image(systemName: "plus")
+                                .accessibilityLabel("Add Account")
                         }
                     }
                 }
