@@ -8,21 +8,40 @@ class AuthManager: ObservableObject {
     @Published var token: String?
     
     private let tokenKey = "auth_token"
+    private let service = "com.sampattitrack.auth"
     
     private init() {
-        self.token = UserDefaults.standard.string(forKey: tokenKey)
+        // Migration: Check UserDefaults first
+        if let legacyToken = UserDefaults.standard.string(forKey: tokenKey) {
+            // Save to Keychain
+            if let data = legacyToken.data(using: .utf8) {
+                KeychainHelper.standard.save(data, service: service, account: tokenKey)
+            }
+            // Remove from UserDefaults
+            UserDefaults.standard.removeObject(forKey: tokenKey)
+            self.token = legacyToken
+        } else {
+            // Load from Keychain
+            if let data = KeychainHelper.standard.read(service: service, account: tokenKey),
+               let token = String(data: data, encoding: .utf8) {
+                self.token = token
+            }
+        }
+
         self.isAuthenticated = self.token != nil
     }
     
     func login(token: String) {
         self.token = token
         self.isAuthenticated = true
-        UserDefaults.standard.set(token, forKey: tokenKey)
+        if let data = token.data(using: .utf8) {
+            KeychainHelper.standard.save(data, service: service, account: tokenKey)
+        }
     }
     
     func logout() {
         self.token = nil
         self.isAuthenticated = false
-        UserDefaults.standard.removeObject(forKey: tokenKey)
+        KeychainHelper.standard.delete(service: service, account: tokenKey)
     }
 }
