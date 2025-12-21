@@ -62,7 +62,7 @@ struct TransactionListView: View {
                         // Alternatively, we could update RowView.
                         NavigationLink(destination: EditTransactionView(transaction: transaction.toTransaction)) {
                             TransactionRowView(
-                                transaction: transaction.toTransaction,
+                                transaction: transaction,
                                 accountID: accountID
                             )
                         }
@@ -113,7 +113,7 @@ struct TransactionListView: View {
     }
     // MARK: - Transaction Row
     struct TransactionRowView: View {
-        let transaction: Transaction
+        let transaction: SDTransaction
         let accountID: String?
         
         var transactionType: Transaction.TransactionType {
@@ -164,7 +164,7 @@ struct TransactionListView: View {
                     .foregroundColor(amountColor)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(transaction.description)
+                    Text(transaction.desc)
                         .font(.headline)
                         .lineLimit(1)
                     
