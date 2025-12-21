@@ -1,0 +1,387 @@
+import SwiftUI
+
+struct DashboardView: View {
+    @StateObject private var viewModel = DashboardViewModel()
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    if viewModel.isLoading && viewModel.summary == nil {
+                        ProgressView()
+                            .padding(.top, 100)
+                    } else if let summary = viewModel.summary {
+                        // Quick Actions
+                        QuickActionsCard()
+                        
+                        // Net Worth Hero Card
+                        NetWorthCard(netWorth: summary.netWorth)
+                        
+                        // Quick Stats Grid
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                            StatCard(
+                                icon: "arrow.up.circle.fill",
+                                title: "Income",
+                                value: CurrencyFormatter.format(summary.lastMonthIncome),
+                                subtitle: "YTD: \(CurrencyFormatter.format(summary.yearlyIncome))",
+                                color: .green
+                            )
+                            
+                            StatCard(
+                                icon: "arrow.down.circle.fill",
+                                title: "Expenses",
+                                value: CurrencyFormatter.format(summary.lastMonthExpenses),
+                                subtitle: "YTD: \(CurrencyFormatter.format(summary.yearlyExpenses))",
+                                color: .red
+                            )
+                            
+                            StatCard(
+                                icon: "banknote.fill",
+                                title: "Assets",
+                                value: CurrencyFormatter.format(summary.totalAssets),
+                                subtitle: nil,
+                                color: .blue
+                            )
+                            
+                            StatCard(
+                                icon: "creditcard.fill",
+                                title: "Liabilities",
+                                value: CurrencyFormatter.formatInverted(summary.totalLiabilities),
+                                subtitle: nil,
+                                color: .orange
+                            )
+                        }
+                        
+                        // Asset Allocation Chart
+                        DashboardAssetChart(
+                            assets: Double(summary.totalAssets) ?? 0,
+                            liabilities: Double(summary.totalLiabilities) ?? 0
+                        )
+                        
+                        // Savings Rate Card
+                        SavingsRateCard(
+                            rate: summary.savingsRate,
+                            saved: summary.yearlySavings
+                        )
+                        
+                        // Daily Expense Chart
+                        if !viewModel.dailyExpenses.isEmpty {
+                            DailyExpenseChart(dailyData: viewModel.dailyExpenses)
+                        }
+                        
+                        // Top Investments
+                        if !viewModel.topInvestments.isEmpty {
+                            TopInvestmentsSection(investments: viewModel.topInvestments)
+                        }
+                        
+                        // Top Expense Tags
+                        if !viewModel.topTags.isEmpty {
+                            TopTagsSection(tags: viewModel.topTags)
+                        }
+                        
+                        // Net Worth Trend
+                        if !viewModel.netWorthHistory.isEmpty {
+                            NetWorthChart(data: viewModel.netWorthHistory)
+                        }
+                        
+                        // Recent Transactions
+                        if !viewModel.recentTransactions.isEmpty {
+                            RecentTransactionsSection(
+                                transactions: viewModel.recentTransactions,
+                                accounts: viewModel.accounts
+                            )
+                        }
+                        
+                    } else if let error = viewModel.errorMessage {
+                        VStack(spacing: 16) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.largeTitle)
+                                .foregroundColor(.red)
+                            Text(error)
+                                .foregroundColor(.secondary)
+                            Button("Retry") {
+                                viewModel.fetchAll()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.top, 100)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Dashboard")
+            .refreshable {
+                viewModel.fetchAll()
+            }
+            .onAppear {
+                viewModel.fetchAll()
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: { AuthManager.shared.logout() }) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Hero Card
+struct NetWorthCard: View {
+    let netWorth: String
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundColor(.white.opacity(0.8))
+                Text("Net Worth")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+            Text(CurrencyFormatter.format(netWorth))
+                .font(.system(size: 36, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .background(
+            LinearGradient(
+                colors: [Color.blue, Color.purple],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .cornerRadius(16)
+        .shadow(color: .blue.opacity(0.4), radius: 15, x: 0, y: 8)
+    }
+}
+
+// MARK: - Stat Card
+struct StatCard: View {
+    let icon: String
+    let title: String
+    let value: String
+    let subtitle: String?
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Text(value)
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundColor(color)
+            if let subtitle = subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Savings Rate
+struct SavingsRateCard: View {
+    let rate: Double
+    let saved: String
+    
+    var body: some View {
+        HStack {
+            Image(systemName: "leaf.fill")
+                .font(.title)
+                .foregroundColor(.green)
+            
+            VStack(alignment: .leading) {
+                Text("Savings Rate")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Text(String(format: "%.1f%%", rate))
+                    .font(.title2)
+                    .fontWeight(.bold)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing) {
+                Text("YTD Saved")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(CurrencyFormatter.format(saved))
+                    .font(.headline)
+                    .foregroundColor(.green)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Top Investments
+struct TopInvestmentsSection: View {
+    let investments: [InvestmentXIRR]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundColor(.purple)
+                Text("Top Investments (XIRR)")
+                    .font(.headline)
+            }
+            
+            ForEach(investments) { inv in
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(inv.account.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text(inv.account.type)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(String(format: "%.2f%%", inv.xirr))
+                        .font(.headline)
+                        .foregroundColor(inv.xirr >= 0 ? .green : .red)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Income vs Expenses
+struct IncomeVsExpensesCard: View {
+    let income: String
+    let expenses: String
+    
+    var netSavings: Double {
+        let inc = Double(income) ?? 0
+        let exp = Double(expenses) ?? 0
+        return inc - exp
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "arrow.left.arrow.right")
+                    .foregroundColor(.blue)
+                Text("Income vs Expenses")
+                    .font(.headline)
+                Spacer()
+            }
+            
+            HStack {
+                VStack {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 12, height: 12)
+                    Text("Income")
+                        .font(.caption)
+                }
+                Spacer()
+                Text(CurrencyFormatter.format(income))
+                    .font(.subheadline)
+                    .foregroundColor(.green)
+            }
+            
+            HStack {
+                VStack {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 12, height: 12)
+                    Text("Expenses")
+                        .font(.caption)
+                }
+                Spacer()
+                Text(CurrencyFormatter.format(expenses))
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+            }
+            
+            Divider()
+            
+            HStack {
+                Text("Net Savings")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Text(CurrencyFormatter.formatCheck(netSavings))
+                    .font(.headline)
+                    .foregroundColor(netSavings >= 0 ? .green : .red)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Recent Transactions
+struct RecentTransactionsSection: View {
+    let transactions: [Transaction]
+    let accounts: [Account]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundColor(.orange)
+                Text("Recent Transactions")
+                    .font(.headline)
+            }
+            
+            ForEach(transactions) { tx in
+                HStack {
+                    // Direction icon
+                    let isIncome = tx.postings.first(where: { (Double($0.amount) ?? 0) < 0 })
+                        .flatMap { p in accounts.first(where: { $0.id == p.accountID }) }
+                        .map { $0.category == "Income" } ?? false
+                    
+                    Image(systemName: isIncome ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                        .foregroundColor(isIncome ? .green : .red)
+                    
+                    VStack(alignment: .leading) {
+                        Text(tx.description)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Text(tx.date)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(CurrencyFormatter.formatCheck(tx.displayAmount))
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
