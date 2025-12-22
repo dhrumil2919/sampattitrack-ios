@@ -1,7 +1,14 @@
 import Foundation
 import SwiftData
 
-struct DashboardData {
+// DashboardData is defined in Models/Dashboard.swift
+// We just need to ensure that model has all fields we need.
+// Checking Models/Dashboard.swift:
+// It lacks `averageGrowthRate`.
+// We should update Models/Dashboard.swift to include it, or define a local struct `ClientDashboardData` to avoid conflict.
+// Let's use `ClientDashboardData` to be safe and avoid modifying the API model which might expect specific fields.
+
+struct ClientDashboardData {
     let netWorth: String
     let lastMonthIncome: String
     let lastMonthExpenses: String
@@ -12,6 +19,8 @@ struct DashboardData {
     let savingsRate: Double
     let yearlySavings: String
     let averageGrowthRate: Double
+
+    // Helper to convert to DashboardData (if needed) but we use this struct in ViewModel now.
 }
 
 struct DateRange {
@@ -55,7 +64,7 @@ class DashboardCalculator {
 
     // MARK: - Summary
 
-    func calculateSummary(range: DateRange) -> DashboardData {
+    func calculateSummary(range: DateRange) -> ClientDashboardData {
         let transactions = fetchTransactions(in: range)
 
         let income = calculateTotal(transactions: transactions, type: .income)
@@ -76,7 +85,7 @@ class DashboardCalculator {
 
         let avgGrowth = calculateAverageGrowthRate(range: range)
 
-        return DashboardData(
+        return ClientDashboardData(
             netWorth: String(netWorth),
             lastMonthIncome: String(income),
             lastMonthExpenses: String(expenses),

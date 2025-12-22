@@ -18,7 +18,7 @@ struct InvestmentXIRR: Identifiable {
 }
 
 class DashboardViewModel: ObservableObject {
-    @Published var summary: DashboardData?
+    @Published var summary: ClientDashboardData?
     @Published var accounts: [Account] = []
     @Published var recentTransactions: [Transaction] = []
     @Published var topInvestments: [InvestmentXIRR] = []
