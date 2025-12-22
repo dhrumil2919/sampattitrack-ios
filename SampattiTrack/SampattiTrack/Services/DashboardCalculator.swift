@@ -19,6 +19,9 @@ struct ClientDashboardData {
     let savingsRate: Double
     let yearlySavings: String
     let averageGrowthRate: Double
+    let netWorthGrowth: Double
+    let expenseGrowth: Double
+    let savingsRateChange: Double
 
     // Helper to convert to DashboardData (if needed) but we use this struct in ViewModel now.
 }
@@ -85,6 +88,9 @@ class DashboardCalculator {
 
         let avgGrowth = calculateAverageGrowthRate(range: range)
 
+        // Calculate MoM Metrics (Last 30 Days vs Previous 30 Days) to show current trends
+        let (nwGrowth, expGrowth, savRateChange) = calculateMoMMetrics()
+
         return ClientDashboardData(
             netWorth: String(netWorth),
             lastMonthIncome: String(income),
@@ -95,8 +101,69 @@ class DashboardCalculator {
             totalLiabilities: String(liabilities), // keeping sign logic consistent with display
             savingsRate: savingsRate,
             yearlySavings: String(ytdSavings),
-            averageGrowthRate: avgGrowth
+            averageGrowthRate: avgGrowth,
+            netWorthGrowth: nwGrowth,
+            expenseGrowth: expGrowth,
+            savingsRateChange: savRateChange
         )
+    }
+
+    private func calculateMoMMetrics() -> (Double, Double, Double) {
+        let now = Date()
+        let calendar = Calendar.current
+
+        // Define "Current" as Last 30 Days
+        guard let startCurrent = calendar.date(byAdding: .day, value: -30, to: now),
+              let startPrevious = calendar.date(byAdding: .day, value: -30, to: startCurrent) else {
+            return (0, 0, 0)
+        }
+
+        let currentRange = DateRange(start: startCurrent, end: now, name: "Current")
+        let previousRange = DateRange(start: startPrevious, end: startCurrent.addingTimeInterval(-1), name: "Previous")
+
+        // 1. Expense Growth
+        let currentTx = fetchTransactions(in: currentRange)
+        let previousTx = fetchTransactions(in: previousRange)
+
+        let currentExpenses = calculateTotal(transactions: currentTx, type: .expense)
+        let previousExpenses = calculateTotal(transactions: previousTx, type: .expense)
+
+        let expenseGrowth = previousExpenses != 0 ? ((currentExpenses - previousExpenses) / previousExpenses) * 100 : 0.0
+
+        // 2. Savings Rate Change
+        let currentIncome = calculateTotal(transactions: currentTx, type: .income)
+        let previousIncome = calculateTotal(transactions: previousTx, type: .income)
+
+        let currentSavingsRate = currentIncome > 0 ? ((currentIncome - currentExpenses) / currentIncome) * 100 : 0.0
+        let previousSavingsRate = previousIncome > 0 ? ((previousIncome - previousExpenses) / previousIncome) * 100 : 0.0
+
+        let savingsRateChange = currentSavingsRate - previousSavingsRate
+
+        // 3. Net Worth Growth (Point in Time)
+        // NW Now vs NW 30 days ago
+        let nwNow = calculateNetWorthAt(date: now)
+        let nwPrev = calculateNetWorthAt(date: startCurrent) // 30 days ago
+
+        let nwGrowth = nwPrev != 0 ? ((nwNow - nwPrev) / abs(nwPrev)) * 100 : 0.0
+
+        return (nwGrowth, expenseGrowth, savingsRateChange)
+    }
+
+    private func calculateNetWorthAt(date: Date) -> Double {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let dateStr = formatter.string(from: date)
+
+        // Fetch all transactions. Note: This could be optimized by caching or fetching only needed fields.
+        let allTx = fetchAllTransactions()
+        var total: Double = 0
+
+        for tx in allTx {
+            if tx.date <= dateStr {
+                total += calculateNetImpact(tx)
+            }
+        }
+        return total
     }
 
     // MARK: - Charts

@@ -30,6 +30,17 @@ struct DashboardCharts {
                                 .foregroundStyle(by: .value("Tag", tagData.tag))
                             }
                         }
+
+                        if let avg = calculateMonthlyAverage() {
+                            RuleMark(y: .value("Average", avg))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [5]))
+                                .foregroundStyle(.gray)
+                                .annotation(position: .top, alignment: .leading) {
+                                    Text("Avg: \(CurrencyFormatter.formatCheck(avg))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                        }
                     }
                     .frame(height: 300)
                     .padding()
@@ -38,6 +49,16 @@ struct DashboardCharts {
             .background(Color(.systemBackground))
             .cornerRadius(12)
             .shadow(color: .black.opacity(0.05), radius: 5)
+        }
+
+        private func calculateMonthlyAverage() -> Double? {
+            // Data is [Month -> [Tags]]
+            // We need average TOTAL spending per month.
+            let monthlyTotals = data.map { monthData in
+                monthData.tags.reduce(0) { $0 + $1.amount }
+            }
+            guard !monthlyTotals.isEmpty else { return nil }
+            return monthlyTotals.reduce(0, +) / Double(monthlyTotals.count)
         }
     }
 

@@ -128,6 +128,17 @@ struct NetWorthChart: View {
                             .interpolationMethod(.catmullRom)
                         }
                     }
+
+                    if let avg = calculateAverage() {
+                        RuleMark(y: .value("Average", avg))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [5]))
+                            .foregroundStyle(.gray)
+                            .annotation(position: .top, alignment: .leading) {
+                                Text("Avg: \(CurrencyFormatter.formatCheck(avg))")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
@@ -147,6 +158,12 @@ struct NetWorthChart: View {
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .padding()
+    }
+
+    private func calculateAverage() -> Double? {
+        let values = data.compactMap { Double($0.netWorth) }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
     }
 }
 
