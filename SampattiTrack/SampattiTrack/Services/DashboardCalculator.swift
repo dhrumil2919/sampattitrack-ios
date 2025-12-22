@@ -146,7 +146,7 @@ class DashboardCalculator {
         let sortedMonths = grouped.keys.sorted()
 
         // Add start point
-        history.append(NetWorthDataPoint(date: startStr, netWorth: String(currentNetWorth), assets: "0", liabilities: "0"))
+        history.append(NetWorthDataPoint(date: startStr, assets: "0", liabilities: "0", netWorth: String(currentNetWorth)))
 
         for month in sortedMonths {
             // Process all transactions in this month
@@ -158,7 +158,7 @@ class DashboardCalculator {
                 // Use the last date found in that month or the actual month end?
                 // Using the month string "YYYY-MM" or the actual date of last tx
                 if let lastTxDate = txs.max(by: { $0.date < $1.date })?.date {
-                    history.append(NetWorthDataPoint(date: lastTxDate, netWorth: String(currentNetWorth), assets: "0", liabilities: "0"))
+                    history.append(NetWorthDataPoint(date: lastTxDate, assets: "0", liabilities: "0", netWorth: String(currentNetWorth)))
                 }
             }
         }
