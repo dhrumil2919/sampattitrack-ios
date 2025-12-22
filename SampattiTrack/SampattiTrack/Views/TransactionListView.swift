@@ -58,9 +58,9 @@ struct TransactionListView: View {
             } else {
                 List {
                     ForEach(filteredTransactions) { transaction in
-                        // We map SDTransaction to Transaction for the existing Row view
-                        // Alternatively, we could update RowView.
-                        NavigationLink(destination: EditTransactionView(transaction: transaction.toTransaction)) {
+                        // OPTIMIZATION: Use value-based navigation to defer the creation of the destination view.
+                        // This prevents `transaction.toTransaction` (expensive deep copy) from running for every row.
+                        NavigationLink(value: transaction) {
                             TransactionRowView(
                                 transaction: transaction,
                                 accountID: accountID
@@ -70,6 +70,9 @@ struct TransactionListView: View {
                     .onDelete(perform: deleteTransactions)
                 }
                 .listStyle(PlainListStyle())
+                .navigationDestination(for: SDTransaction.self) { transaction in
+                    EditTransactionView(transaction: transaction.toTransaction)
+                }
             }
         }
         .navigationTitle("Transactions")
