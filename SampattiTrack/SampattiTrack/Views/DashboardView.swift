@@ -1,21 +1,32 @@
 import SwiftUI
+import SwiftData
 
 struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
+    @Environment(\.modelContext) private var modelContext
+
+    // Navigation States
+    @State private var showingVizView = false
+    @State private var showingTagsView = false
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
+                    // Time Range Picker
+                    TimeRangePicker(selection: $viewModel.selectedRange)
+                        .padding(.horizontal, -16) // Edge-to-edge
+
                     if viewModel.isLoading && viewModel.summary == nil {
                         ProgressView()
                             .padding(.top, 100)
                     } else if let summary = viewModel.summary {
-                        // Quick Actions
-                        QuickActionsCard()
                         
                         // Net Worth Hero Card
                         NetWorthCard(netWorth: summary.netWorth)
+                            .onTapGesture {
+                                showingVizView = true
+                            }
                         
                         // Quick Stats Grid
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
@@ -23,7 +34,7 @@ struct DashboardView: View {
                                 icon: "arrow.up.circle.fill",
                                 title: "Income",
                                 value: CurrencyFormatter.format(summary.lastMonthIncome),
-                                subtitle: "YTD: \(CurrencyFormatter.format(summary.yearlyIncome))",
+                                subtitle: "Avg Growth: \(String(format: "%.1f", summary.averageGrowthRate))%",
                                 color: .green
                             )
                             
@@ -52,36 +63,40 @@ struct DashboardView: View {
                             )
                         }
                         
-                        // Asset Allocation Chart
-                        DashboardAssetChart(
-                            assets: Double(summary.totalAssets) ?? 0,
-                            liabilities: Double(summary.totalLiabilities) ?? 0
-                        )
-                        
                         // Savings Rate Card
                         SavingsRateCard(
                             rate: summary.savingsRate,
                             saved: summary.yearlySavings
                         )
                         
-                        // Daily Expense Chart
-                        if !viewModel.dailyExpenses.isEmpty {
-                            DailyExpenseChart(dailyData: viewModel.dailyExpenses)
+                        // Net Worth Trend
+                        if !viewModel.netWorthHistory.isEmpty {
+                            NetWorthChart(data: viewModel.netWorthHistory)
+                                .onTapGesture {
+                                    showingVizView = true
+                                }
+                        }
+                        
+                        // Expense Pie Chart
+                        if !viewModel.topTags.isEmpty {
+                            if #available(iOS 17.0, *) {
+                                DashboardCharts.ExpensePieChart(data: viewModel.topTags)
+                                    .onTapGesture {
+                                        showingTagsView = true
+                                    }
+                            }
+                        }
+                        
+                        // Tag Spending Stacked Bar
+                        if !viewModel.monthlyTagSpending.isEmpty {
+                            if #available(iOS 16.0, *) {
+                                DashboardCharts.TagSpendingChart(data: viewModel.monthlyTagSpending)
+                            }
                         }
                         
                         // Top Investments
                         if !viewModel.topInvestments.isEmpty {
                             TopInvestmentsSection(investments: viewModel.topInvestments)
-                        }
-                        
-                        // Top Expense Tags
-                        if !viewModel.topTags.isEmpty {
-                            TopTagsSection(tags: viewModel.topTags)
-                        }
-                        
-                        // Net Worth Trend
-                        if !viewModel.netWorthHistory.isEmpty {
-                            NetWorthChart(data: viewModel.netWorthHistory)
                         }
                         
                         // Recent Transactions
@@ -92,6 +107,15 @@ struct DashboardView: View {
                             )
                         }
                         
+                        // Hidden Links
+                        NavigationLink(isActive: $showingVizView) {
+                             VizView()
+                        } label: { EmptyView() }
+
+                        NavigationLink(isActive: $showingTagsView) {
+                            TagListView()
+                        } label: { EmptyView() }
+
                     } else if let error = viewModel.errorMessage {
                         VStack(spacing: 16) {
                             Image(systemName: "exclamationmark.triangle")
@@ -114,6 +138,7 @@ struct DashboardView: View {
                 viewModel.fetchAll()
             }
             .onAppear {
+                viewModel.setContainer(modelContext.container)
                 viewModel.fetchAll()
             }
             .toolbar {
@@ -126,7 +151,6 @@ struct DashboardView: View {
         }
     }
 }
-
 // MARK: - Hero Card
 struct NetWorthCard: View {
     let netWorth: String
@@ -139,6 +163,9 @@ struct NetWorthCard: View {
                 Text("Net Worth")
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.8))
+                Image(systemName: "chevron.right")
+                     .font(.caption)
+                     .foregroundColor(.white.opacity(0.5))
             }
             Text(CurrencyFormatter.format(netWorth))
                 .font(.system(size: 36, weight: .bold))
@@ -260,74 +287,6 @@ struct TopInvestmentsSection: View {
                         .foregroundColor(inv.xirr >= 0 ? .green : .red)
                 }
                 .padding(.vertical, 4)
-            }
-        }
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.05), radius: 5)
-    }
-}
-
-// MARK: - Income vs Expenses
-struct IncomeVsExpensesCard: View {
-    let income: String
-    let expenses: String
-    
-    var netSavings: Double {
-        let inc = Double(income) ?? 0
-        let exp = Double(expenses) ?? 0
-        return inc - exp
-    }
-    
-    var body: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "arrow.left.arrow.right")
-                    .foregroundColor(.blue)
-                Text("Income vs Expenses")
-                    .font(.headline)
-                Spacer()
-            }
-            
-            HStack {
-                VStack {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 12, height: 12)
-                    Text("Income")
-                        .font(.caption)
-                }
-                Spacer()
-                Text(CurrencyFormatter.format(income))
-                    .font(.subheadline)
-                    .foregroundColor(.green)
-            }
-            
-            HStack {
-                VStack {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 12, height: 12)
-                    Text("Expenses")
-                        .font(.caption)
-                }
-                Spacer()
-                Text(CurrencyFormatter.format(expenses))
-                    .font(.subheadline)
-                    .foregroundColor(.red)
-            }
-            
-            Divider()
-            
-            HStack {
-                Text("Net Savings")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-                Text(CurrencyFormatter.formatCheck(netSavings))
-                    .font(.headline)
-                    .foregroundColor(netSavings >= 0 ? .green : .red)
             }
         }
         .padding()

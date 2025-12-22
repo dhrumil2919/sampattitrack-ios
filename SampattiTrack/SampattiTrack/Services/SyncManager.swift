@@ -13,6 +13,7 @@ class SyncManager: ObservableObject {
     // MARK: - Sync Logic
     
     func syncAll() async {
+        await pullTags()
         await pullAccounts()
         await pullTransactions()
         await pushTransactions()
@@ -20,6 +21,24 @@ class SyncManager: ObservableObject {
     
     // MARK: - Pull
     
+    func pullTags() async {
+        print("Pulling Tags...")
+        return await withCheckedContinuation { continuation in
+            apiClient.listTags { (result: Result<TagListResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    DispatchQueue.main.async {
+                        self.updateLocalTags(response.data)
+                        continuation.resume()
+                    }
+                case .failure(let error):
+                    print("Error fetching tags: \(error)")
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     func pullAccounts() async {
         print("Pulling Accounts...")
         return await withCheckedContinuation { continuation in
@@ -41,15 +60,13 @@ class SyncManager: ObservableObject {
     func pullTransactions() async {
         print("Pulling Transactions...")
         
-        // Limit to recent 500 transactions to avoid memory issues on initial sync
-        // User can pull-to-refresh to load more if needed
+        // Remove limits to support full history for charts
         let pageSize = 100
-        let maxTransactions = 500
         var offset = 0
         var hasMore = true
         var totalFetched = 0
         
-        while hasMore && totalFetched < maxTransactions {
+        while hasMore {
             let transactions = await fetchTransactionPage(limit: pageSize, offset: offset)
             
             if transactions.isEmpty {
@@ -165,6 +182,30 @@ class SyncManager: ObservableObject {
     
     // MARK: - Helpers
     
+    private func updateLocalTags(_ tags: [Tag]) {
+        for tag in tags {
+            let id = tag.id
+            let descriptor = FetchDescriptor<SDTag>(predicate: #Predicate { $0.id == id })
+
+            if let existing = try? modelContext.fetch(descriptor).first {
+                existing.name = tag.name
+                existing.desc = tag.description
+                existing.color = tag.color
+                existing.isSynced = true
+            } else {
+                let newTag = SDTag(
+                    id: tag.id,
+                    name: tag.name,
+                    desc: tag.description,
+                    color: tag.color,
+                    isSynced: true
+                )
+                modelContext.insert(newTag)
+            }
+        }
+        try? modelContext.save()
+    }
+
     private func updateLocalAccounts(_ accounts: [Account]) {
         for account in accounts {
             // Check if exists
@@ -197,6 +238,12 @@ class SyncManager: ObservableObject {
     }
     
     private func updateLocalTransactions(_ transactions: [Transaction]) {
+        // Pre-fetch all tags to link efficiently
+        // In a real optimized scenario, we'd only fetch needed tags, but assuming tag count is small (<100)
+        let tagDescriptor = FetchDescriptor<SDTag>()
+        let allTags = (try? modelContext.fetch(tagDescriptor)) ?? []
+        let tagMap = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
+
         for transaction in transactions {
              let id = transaction.id
              let descriptor = FetchDescriptor<SDTransaction>(predicate: #Predicate { $0.id == id })
@@ -217,13 +264,16 @@ class SyncManager: ObservableObject {
                 }
                 
                 existing.postings = transaction.postings.map { p in
-                    SDPosting(
+                    let postingTags = p.tags?.compactMap { tagMap[$0.id] }
+
+                    return SDPosting(
                         id: p.id,
                         accountID: p.accountID,
                         accountName: p.accountName,
                         amount: p.amount,
                         quantity: p.quantity,
-                        unitCode: p.unitCode
+                        unitCode: p.unitCode,
+                        tags: postingTags
                     )
                 }
                 
@@ -236,13 +286,16 @@ class SyncManager: ObservableObject {
                     isSynced: true
                 )
                  newTransaction.postings = transaction.postings.map { p in
-                    SDPosting(
+                    let postingTags = p.tags?.compactMap { tagMap[$0.id] }
+
+                    return SDPosting(
                         id: p.id,
                         accountID: p.accountID,
                         accountName: p.accountName,
                         amount: p.amount,
                         quantity: p.quantity,
-                        unitCode: p.unitCode
+                        unitCode: p.unitCode,
+                        tags: postingTags
                     )
                 }
                 modelContext.insert(newTransaction)

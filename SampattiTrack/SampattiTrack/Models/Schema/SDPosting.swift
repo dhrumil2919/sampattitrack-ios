@@ -12,12 +12,16 @@ class SDPosting {
     
     var transaction: SDTransaction?
     
-    init(id: UUID = UUID(), accountID: String, accountName: String? = nil, amount: String, quantity: String? = nil, unitCode: String? = nil) {
+    @Relationship(inverse: \SDTag.postings)
+    var tags: [SDTag]?
+
+    init(id: UUID = UUID(), accountID: String, accountName: String? = nil, amount: String, quantity: String? = nil, unitCode: String? = nil, tags: [SDTag]? = nil) {
         self.id = id
         self.accountID = accountID
         self.accountName = accountName
         self.amount = amount
         self.quantity = quantity
         self.unitCode = unitCode
+        self.tags = tags
     }
 }
