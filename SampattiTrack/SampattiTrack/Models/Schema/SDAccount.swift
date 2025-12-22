@@ -10,12 +10,14 @@ class SDAccount {
     var currency: String?
     var icon: String?
     var parentID: String?
+    var relatedAccountID: String?
     
     // Sync Metadata
     var isSynced: Bool = true // Accounts are mostly read-only/pulled from server initially
+    var isNew: Bool = false // True if created locally and never pushed
     var updatedAt: Date = Date()
     
-    init(id: String, name: String, category: String, type: String, currency: String? = nil, icon: String? = nil, parentID: String? = nil) {
+    init(id: String, name: String, category: String, type: String, currency: String? = nil, icon: String? = nil, parentID: String? = nil, relatedAccountID: String? = nil) {
         self.id = id
         self.name = name
         self.category = category
@@ -23,6 +25,7 @@ class SDAccount {
         self.currency = currency
         self.icon = icon
         self.parentID = parentID
+        self.relatedAccountID = relatedAccountID
         self.updatedAt = Date()
     }
     

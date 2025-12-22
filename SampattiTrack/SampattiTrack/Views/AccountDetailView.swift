@@ -4,6 +4,7 @@ import Charts
 struct AccountDetailView: View {
     let account: Account
     @StateObject private var viewModel: AccountDetailViewModel
+    @Environment(\.modelContext) private var modelContext
     
     init(account: Account) {
         self.account = account
@@ -59,7 +60,7 @@ struct AccountDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink(destination: EditAccountView(account: account)) {
+                NavigationLink(destination: EditAccountView(account: account, modelContext: modelContext)) {
                     Text("Edit")
                 }
             }

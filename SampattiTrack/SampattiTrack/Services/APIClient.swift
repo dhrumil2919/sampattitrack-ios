@@ -139,5 +139,17 @@ class APIClient: ObservableObject {
     func deleteTag(id: String, completion: @escaping (Result<EmptyResponse, APIError>) -> Void) {
         request("/tags/\(id)", method: "DELETE", completion: completion)
     }
+
+    // MARK: - Account APIs
+
+    /// Create a new account
+    func createAccount(_ account: CreateAccountRequest, completion: @escaping (Result<AccountListResponse, APIError>) -> Void) {
+        request("/accounts", method: "POST", body: account, completion: completion)
+    }
+
+    /// Update an existing account
+    func updateAccount(id: String, _ account: CreateAccountRequest, completion: @escaping (Result<AccountListResponse, APIError>) -> Void) {
+        request("/accounts/\(id)", method: "PUT", body: account, completion: completion)
+    }
 }
 

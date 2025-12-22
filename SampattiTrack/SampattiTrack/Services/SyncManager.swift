@@ -17,6 +17,7 @@ class SyncManager: ObservableObject {
         await pullAccounts()
         await pullTransactions()
         await pushTransactions()
+        await pushAccounts()
     }
     
     // MARK: - Pull
@@ -107,6 +108,66 @@ class SyncManager: ObservableObject {
     
     // MARK: - Push
     
+    func pushAccounts() async {
+        print("Pushing Unsynced Accounts...")
+        let descriptor = FetchDescriptor<SDAccount>(predicate: #Predicate { $0.isSynced == false })
+        do {
+            let unsynced = try modelContext.fetch(descriptor)
+            for account in unsynced {
+                await pushAccount(account)
+            }
+        } catch {
+             print("Error fetching unsynced accounts: \(error)")
+        }
+    }
+
+    private func pushAccount(_ account: SDAccount) async {
+        print("Pushing account: \(account.name)")
+
+        let requestBody = CreateAccountRequest(
+            id: account.id,
+            name: account.name,
+            category: account.category,
+            type: account.type,
+            currency: account.currency,
+            parentID: account.parentID,
+            relatedAccountID: account.relatedAccountID
+        )
+
+        return await withCheckedContinuation { continuation in
+            if account.isNew {
+                apiClient.createAccount(requestBody) { (result: Result<AccountListResponse, APIClient.APIError>) in
+                    switch result {
+                    case .success:
+                        DispatchQueue.main.async {
+                            account.isSynced = true
+                            account.isNew = false
+                            try? self.modelContext.save()
+                            continuation.resume()
+                        }
+                    case .failure(let error):
+                        print("Failed to create account \(account.name): \(error)")
+                        continuation.resume()
+                    }
+                }
+            } else {
+                apiClient.updateAccount(id: account.id, requestBody) { (result: Result<AccountListResponse, APIClient.APIError>) in
+                    switch result {
+                    case .success:
+                        DispatchQueue.main.async {
+                            account.isSynced = true
+                            try? self.modelContext.save()
+                            continuation.resume()
+                        }
+                    case .failure(let error):
+                        print("Failed to update account \(account.name): \(error)")
+                        continuation.resume()
+                    }
+                }
+            }
+        }
+    }
+
     func pushTransactions() async {
         print("Pushing Unsynced Transactions...")
         // Fetch unsynced transactions

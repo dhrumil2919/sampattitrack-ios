@@ -91,7 +91,7 @@ struct AccountListView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        NavigationLink(destination: AddAccountView()) {
+                        NavigationLink(destination: EditAccountView(account: nil, modelContext: modelContext)) {
                             Image(systemName: "plus")
                                 .accessibilityLabel("Add Account")
                         }
@@ -153,10 +153,3 @@ struct AccountRowView: View {
     }
 }
 
-// MARK: - Add Account View (Placeholder)
-struct AddAccountView: View {
-    var body: some View {
-        Text("Add Account Coming Soon")
-            .navigationTitle("Add Account")
-    }
-}
