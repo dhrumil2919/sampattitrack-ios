@@ -23,7 +23,7 @@ struct ContentView: View {
                             }
 
 
-                        NavigationView {
+                        NavigationStack {
                             TransactionListView()
                         }
                         .tabItem {
