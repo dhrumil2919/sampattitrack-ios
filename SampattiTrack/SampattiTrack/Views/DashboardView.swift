@@ -23,7 +23,7 @@ struct DashboardView: View {
                     } else if let summary = viewModel.summary {
                         
                         // Net Worth Hero Card
-                        NetWorthCard(netWorth: summary.netWorth)
+                        NetWorthCard(netWorth: summary.netWorth, growth: summary.netWorthGrowth)
                             .onTapGesture {
                                 showingVizView = true
                             }
@@ -42,7 +42,7 @@ struct DashboardView: View {
                                 icon: "arrow.down.circle.fill",
                                 title: "Expenses",
                                 value: CurrencyFormatter.format(summary.lastMonthExpenses),
-                                subtitle: "YTD: \(CurrencyFormatter.format(summary.yearlyExpenses))",
+                                subtitle: "MoM: \(summary.expenseGrowth > 0 ? "+" : "")\(String(format: "%.1f", summary.expenseGrowth))%",
                                 color: .red
                             )
                             
@@ -66,7 +66,8 @@ struct DashboardView: View {
                         // Savings Rate Card
                         SavingsRateCard(
                             rate: summary.savingsRate,
-                            saved: summary.yearlySavings
+                            saved: summary.yearlySavings,
+                            change: summary.savingsRateChange
                         )
                         
                         // Net Worth Trend
@@ -154,6 +155,7 @@ struct DashboardView: View {
 // MARK: - Hero Card
 struct NetWorthCard: View {
     let netWorth: String
+    let growth: Double
     
     var body: some View {
         VStack(spacing: 8) {
@@ -170,6 +172,17 @@ struct NetWorthCard: View {
             Text(CurrencyFormatter.format(netWorth))
                 .font(.system(size: 36, weight: .bold))
                 .foregroundColor(.white)
+
+            HStack(spacing: 4) {
+                Image(systemName: growth >= 0 ? "arrow.up.right" : "arrow.down.right")
+                Text("\(growth > 0 ? "+" : "")\(String(format: "%.1f", growth))% MoM")
+            }
+            .font(.caption)
+            .foregroundColor(.white.opacity(0.9))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.2))
+            .cornerRadius(8)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
@@ -224,6 +237,7 @@ struct StatCard: View {
 struct SavingsRateCard: View {
     let rate: Double
     let saved: String
+    let change: Double
     
     var body: some View {
         HStack {
@@ -235,9 +249,15 @@ struct SavingsRateCard: View {
                 Text("Savings Rate")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                Text(String(format: "%.1f%%", rate))
-                    .font(.title2)
-                    .fontWeight(.bold)
+                HStack(alignment: .lastTextBaseline) {
+                    Text(String(format: "%.1f%%", rate))
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    Text("\(change > 0 ? "+" : "")\(String(format: "%.1f", change))%")
+                        .font(.caption)
+                        .foregroundColor(change >= 0 ? .green : .red)
+                }
             }
             
             Spacer()
