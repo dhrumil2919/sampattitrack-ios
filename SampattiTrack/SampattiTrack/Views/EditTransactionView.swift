@@ -410,6 +410,7 @@ struct TagsEditorView: View {
                         .font(.caption)
                         .foregroundColor(.blue)
                     }
+                    .accessibilityLabel("Add tag")
                 }
             }
             
@@ -460,6 +461,7 @@ struct TagChip: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .accessibilityLabel("Remove \(name) tag")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

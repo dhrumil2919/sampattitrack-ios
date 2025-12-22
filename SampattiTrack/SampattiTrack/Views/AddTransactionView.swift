@@ -134,12 +134,18 @@ struct AddTransactionView: View {
                 }
             }
             
-            Section {
+            Section(footer: Group {
+                if !viewModel.isBalanced {
+                    Text("Transaction must be balanced (difference is 0) to save.")
+                        .foregroundColor(.secondary)
+                }
+            }) {
                 Button(action: {
                     viewModel.createTransaction()
                 }) {
                     if viewModel.isSaving {
                         ProgressView()
+                            .accessibilityLabel("Saving transaction")
                     } else {
                         Text("Create Transaction")
                             .frame(maxWidth: .infinity)
