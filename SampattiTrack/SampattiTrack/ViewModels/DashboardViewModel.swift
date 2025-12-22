@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftData
 
 struct XIRRResponse: Codable {
     let success: Bool
@@ -17,35 +18,38 @@ struct InvestmentXIRR: Identifiable {
 }
 
 class DashboardViewModel: ObservableObject {
-    @Published var summary: DashboardData?
+    @Published var summary: ClientDashboardData?
     @Published var accounts: [Account] = []
     @Published var recentTransactions: [Transaction] = []
     @Published var topInvestments: [InvestmentXIRR] = []
     @Published var netWorthHistory: [NetWorthDataPoint] = []
-    @Published var dailyExpenses: [(day: String, amount: Double)] = []
+    @Published var monthlyTagSpending: [(month: String, tags: [(tag: String, amount: Double)])] = []
     @Published var topTags: [TopTag] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    @Published var selectedRange: DateRange = .lastMonth() {
+        didSet {
+            calculateClientSideData()
+        }
+    }
+
+    // Use ModelContainer to create background context safely
+    private var container: ModelContainer?
+
+    func setContainer(_ container: ModelContainer) {
+        self.container = container
+        // Initial calculation
+        calculateClientSideData()
+    }
+
     func fetchAll() {
         isLoading = true
         errorMessage = nil
         
-        // Fetch summary
-        APIClient.shared.request("/dashboard/summary") { (result: Result<DashboardSummaryResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.summary = response.data
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error)"
-                }
-            }
-        }
+        calculateClientSideData()
         
-        // Fetch accounts
+        // Fetch accounts for XIRR
         APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
             DispatchQueue.main.async {
                 switch result {
@@ -60,63 +64,39 @@ class DashboardViewModel: ObservableObject {
             }
         }
         
-        // Fetch recent transactions (for display)
-        APIClient.shared.request("/transactions?limit=5") { (result: Result<TransactionListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.recentTransactions = response.data.data
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
+        // Fetch recent transactions (API)
+        // We do this via API for now, but also have local fallback in calculateClientSideData
+        // Actually, let's move recent transactions to local calc to ensure offline support.
+        // API call removed.
         
-        // Fetch more transactions for daily expense calculation
-        APIClient.shared.request("/transactions?limit=100") { (result: Result<TransactionListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.calculateDailyExpenses(from: response.data.data)
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        // Fetch net worth history
-        APIClient.shared.request("/analysis/net-worth?interval=monthly") { (result: Result<NetWorthHistoryResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.netWorthHistory = response.data.sorted(by: { $0.date < $1.date })
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        // Fetch top tags
-        APIClient.shared.fetchTopTags { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.topTags = response.data
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
+        self.isLoading = false
+    }
 
+    private func calculateClientSideData() {
+        guard let container = container else { return }
+        
+        Task.detached(priority: .userInitiated) {
+            // Create a new context on this background thread
+            let context = ModelContext(container)
+            // Disable autosave for read-only operations to improve performance
+            context.autosaveEnabled = false
+
+            let calculator = DashboardCalculator(modelContext: context)
+
+            let summaryData = calculator.calculateSummary(range: self.selectedRange)
+            let history = calculator.calculateNetWorthHistory(range: self.selectedRange)
+            let tags = calculator.calculateTagBreakdown(range: self.selectedRange)
+            let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
+            let recent = calculator.fetchRecentTransactions(limit: 5)
+
+            await MainActor.run {
+                self.summary = summaryData
+                self.netWorthHistory = history
+                self.topTags = tags
+                self.monthlyTagSpending = spending
+                self.recentTransactions = recent
+            }
+        }
     }
     
     private func fetchXIRRForInvestments() {
@@ -146,56 +126,7 @@ class DashboardViewModel: ObservableObject {
         }
         
         group.notify(queue: .main) {
-            // Sort by XIRR descending and take top 3
             self.topInvestments = results.sorted { $0.xirr > $1.xirr }.prefix(3).map { $0 }
         }
-    }
-    
-    // Legacy method for compatibility
-    func fetchSummary() {
-        fetchAll()
-    }
-    
-    func calculateDailyExpenses(from transactions: [Transaction]) {
-        // Calculate daily expenses for current month from transactions
-        let calendar = Calendar.current
-        let now = Date()
-        
-        guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) else {
-            return
-        }
-        
-        // Group transactions by day
-        var dailyExpenseMap: [Int: Double] = [:]
-        
-        for transaction in transactions {
-            // Parse transaction date
-            let formatter = ISO8601DateFormatter()
-            guard let txDate = formatter.date(from: transaction.date),
-                  txDate >= monthStart else {
-                continue
-            }
-            
-            let day = calendar.component(.day, from: txDate)
-            
-            // Sum up expense postings (negative amounts from expense accounts)
-            for posting in transaction.postings {
-                if let account = accounts.first(where: { $0.id == posting.accountID }),
-                   account.category == "Expense" {
-                    let amount = abs(Double(posting.amount) ?? 0)
-                    dailyExpenseMap[day, default: 0] += amount
-                }
-            }
-        }
-        
-        // Convert to array and sort by day
-        var expenses: [(day: String, amount: Double)] = []
-        for day in 1...31 {
-            if let amount = dailyExpenseMap[day] {
-                expenses.append((day: String(day), amount: amount))
-            }
-        }
-        
-        self.dailyExpenses = expenses.sorted { Int($0.day) ?? 0 < Int($1.day) ?? 0 }
     }
 }

@@ -34,11 +34,6 @@ struct ContentView: View {
                             .tabItem {
                                 Label("Units", systemImage: "cube.box")
                             }
-                        
-                        TagListView()
-                            .tabItem {
-                                Label("Tags", systemImage: "tag.fill")
-                            }
                     }
                     .task {
                         // Trigger initial sync if authenticated
