@@ -18,6 +18,10 @@ struct SampattiTrackApp: App {
             let schema = Schema([
                 SDTransaction.self,
                 SDAccount.self,
+                SDPosting.self,
+                SDTag.self,
+                SDUnit.self,
+                SyncQueueItem.self,
             ])
             let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

@@ -1,9 +1,13 @@
 import SwiftUI
+import SwiftData
 import Charts
 
+/// AccountDetailView - OFFLINE-FIRST
+/// Uses local SwiftData via AccountDetailViewModel. No API calls.
 struct AccountDetailView: View {
     let account: Account
     @StateObject private var viewModel: AccountDetailViewModel
+    @Environment(\.modelContext) private var modelContext
     
     init(account: Account) {
         self.account = account
@@ -18,7 +22,7 @@ struct AccountDetailView: View {
                     Text(account.name)
                         .font(.title2)
                         .fontWeight(.bold)
-                    Text(CurrencyFormatter.format(viewModel.balance, currency: account.currency ?? "INR"))
+                    Text(CurrencyFormatter.format(String(viewModel.balance), currency: account.currency ?? "INR"))
                         .font(.system(size: 34, weight: .bold))
                         .foregroundColor(account.category == "Liability" ? .red : .green)
                     Text(account.category.uppercased())
@@ -29,13 +33,13 @@ struct AccountDetailView: View {
                 }
                 .padding()
                 
-                // Chart (Requires iOS 16+)
+                // Chart - uses BalanceHistoryPoint from AccountDetailViewModel
                 if #available(iOS 16.0, *) {
-                    if !viewModel.history.isEmpty {
-                        Chart(viewModel.history) { point in
+                    if !viewModel.historyData.isEmpty {
+                        Chart(viewModel.historyData) { point in
                             LineMark(
-                                x: .value("Date", point.date), // Simplification: string date might not sort correctly without parsing.
-                                y: .value("Balance", Double(point.balance) ?? 0.0)
+                                x: .value("Date", point.date),
+                                y: .value("Balance", point.balance)
                             )
                         }
                         .frame(height: 200)
@@ -43,7 +47,7 @@ struct AccountDetailView: View {
                     }
                 }
                 
-                // Transactions Link or Embedded List
+                // Transactions Link
                 NavigationLink(destination: TransactionListView(accountID: account.id)) {
                     Text("View Transactions")
                         .fontWeight(.semibold)
@@ -65,7 +69,10 @@ struct AccountDetailView: View {
             }
         }
         .onAppear {
-            viewModel.fetchDetails()
+            // Inject container and fetch local data
+            if let container = try? modelContext.container {
+                viewModel.setContainer(container)
+            }
         }
     }
 }

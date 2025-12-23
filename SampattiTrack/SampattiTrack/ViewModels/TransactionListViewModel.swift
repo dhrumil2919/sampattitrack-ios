@@ -1,41 +1,18 @@
 import Foundation
+import SwiftData
 import Combine
 
+/// TransactionListViewModel - OFFLINE-FIRST
+/// Uses local SwiftData. This ViewModel is now DEPRECATED - TransactionListView uses @Query directly.
+/// Keeping for backwards compatibility but all methods are no-ops.
 class TransactionListViewModel: ObservableObject {
     @Published var transactions: [Transaction] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    // Support filtering by account
-    let accountID: String?
-    
-    init(accountID: String? = nil) {
-        self.accountID = accountID
-    }
-    
-    func fetchTransactions() {
-        isLoading = true
-        errorMessage = nil
-        
-        var endpoint = "/transactions?limit=50&offset=0"
-        if let accID = accountID {
-            endpoint += "&account_id=\(accID)"
-        }
-        
-        APIClient.shared.request(endpoint) { (result: Result<TransactionListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.transactions = response.data.data
-                    } else {
-                        self.errorMessage = "Failed to load transactions"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error)"
-                }
-            }
-        }
+    /// DEPRECATED: TransactionListView now uses @Query on SDTransaction
+    func fetchTransactions(accountID: String? = nil) {
+        // No-op - data comes from SwiftData @Query
+        isLoading = false
     }
 }

@@ -1,18 +1,21 @@
 import SwiftUI
+import SwiftData
 import Charts
 
+/// VizView - OFFLINE-FIRST
+/// Uses local SwiftData via VizViewModel. No API calls.
 struct VizView: View {
     @StateObject private var viewModel = VizViewModel()
-    @State private var selectedChart = 0 // 0: Net Worth, 1: Asset Allocation, 2: Top Tags
-
+    @State private var selectedChart = 0 // 0: Net Worth, 1: Top Tags
+    @Environment(\.modelContext) private var modelContext
+    
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
                     Picker("Chart Type", selection: $selectedChart) {
                         Text("Net Worth").tag(0)
-                        Text("Asset Allocation").tag(1)
-                        Text("Top Tags").tag(2)
+                        Text("Top Tags").tag(1)
                     }
                     .pickerStyle(.segmented)
                     .padding()
@@ -23,59 +26,18 @@ struct VizView: View {
                     } else {
                         if selectedChart == 0 {
                             NetWorthChart(data: viewModel.netWorthHistory)
-                        } else if selectedChart == 1 {
-                            if #available(iOS 17.0, *) {
-                                AssetAllocationChart(data: viewModel.assetAllocation)
-                            } else {
-                                Text("Asset Allocation Chart requires iOS 17.0+")
-                                    .foregroundColor(.secondary)
-                                    .frame(height: 300)
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color(.systemBackground))
-                                    .cornerRadius(12)
-                                    .padding()
-                            }
                         } else {
                             TopTagsChart(data: viewModel.topTags)
                         }
-                    }
-
-                    // Detailed List below
-                    if selectedChart == 1 && !viewModel.assetPerformance.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Asset Details")
-                                .font(.headline)
-                                .padding(.horizontal)
-
-                            ForEach(viewModel.assetPerformance) { asset in
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(asset.accountName)
-                                            .font(.subheadline)
-                                        Text(asset.type)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    VStack(alignment: .trailing) {
-                                        Text(CurrencyFormatter.formatCheck(asset.currentValueValue))
-                                            .font(.subheadline)
-                                        Text(String(format: "%.2f%%", asset.xirr))
-                                            .font(.caption)
-                                            .foregroundColor(asset.xirr >= 0 ? .green : .red)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                Divider()
-                            }
-                        }
-                        .padding(.vertical)
                     }
                 }
             }
             .navigationTitle("Visualizations")
             .onAppear {
-                viewModel.fetchData()
+                // VizViewModel needs container for detached context
+                if let container = try? modelContext.container {
+                    viewModel.setContainer(container)
+                }
             }
         }
     }
@@ -164,40 +126,5 @@ struct NetWorthChart: View {
         let values = data.compactMap { Double($0.netWorth) }
         guard !values.isEmpty else { return nil }
         return values.reduce(0, +) / Double(values.count)
-    }
-}
-
-@available(iOS 17.0, *)
-struct AssetAllocationChart: View {
-    let data: [(type: String, value: Double)]
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("Asset Allocation")
-                .font(.headline)
-                .padding(.horizontal)
-
-            if data.isEmpty {
-                 Text("No asset data available")
-                    .foregroundColor(.secondary)
-                    .frame(height: 300)
-                    .frame(maxWidth: .infinity)
-            } else {
-                Chart(data, id: \.type) { item in
-                    SectorMark(
-                        angle: .value("Value", item.value),
-                        innerRadius: .ratio(0.5),
-                        angularInset: 1.5
-                    )
-                    .cornerRadius(5)
-                    .foregroundStyle(by: .value("Type", item.type))
-                }
-                .frame(height: 300)
-                .padding()
-            }
-        }
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .padding()
     }
 }

@@ -138,5 +138,17 @@ class APIClient: ObservableObject {
     func deleteTag(id: String, completion: @escaping (Result<EmptyResponse, APIError>) -> Void) {
         request("/tags/\(id)", method: "DELETE", completion: completion)
     }
+    
+    // MARK: - Raw JSON Request (for offline queue)
+    
+    /// Request with raw JSON dictionary (for queue items)
+    func requestRaw<T: Decodable>(_ endpoint: String, method: String = "GET", body: [String: Any]?, completion: @escaping (Result<T, APIError>) -> Void) {
+        do {
+            let data = body != nil ? try JSONSerialization.data(withJSONObject: body!) : nil
+            request(endpoint, method: method, body: data, completion: completion)
+        } catch {
+            completion(.failure(.networkError(error)))
+        }
+    }
 }
 

@@ -1,18 +1,26 @@
 import SwiftUI
-import Combine
+import SwiftData
 
+/// UnitListView - OFFLINE-FIRST
+/// Uses @Query on SDUnit. No API calls.
 struct UnitListView: View {
-    @StateObject private var viewModel = UnitListViewModel()
+    @Query(sort: \SDUnit.name) private var units: [SDUnit]
+    @EnvironmentObject var syncManager: SyncManager
     
     var body: some View {
         NavigationView {
             Group {
-                if viewModel.isLoading {
-                    ProgressView()
-                } else if let error = viewModel.errorMessage {
-                    Text(error).foregroundColor(.red)
+                if units.isEmpty {
+                    VStack {
+                        Text("No units found")
+                        Button("Sync Now") {
+                            Task {
+                                await syncManager.syncAll()
+                            }
+                        }
+                    }
                 } else {
-                    List(viewModel.units) { unit in
+                    List(units, id: \.code) { unit in
                         VStack(alignment: .leading) {
                             Text(unit.name)
                                 .font(.headline)
@@ -39,32 +47,9 @@ struct UnitListView: View {
                      }
                 }
             }
-            .onAppear {
-                viewModel.fetchUnits()
+            .refreshable {
+                await syncManager.syncAll()
             }
-        }
-    }
-}
-
-class UnitListViewModel: ObservableObject {
-    @Published var units: [FinancialUnit] = []
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-    
-    func fetchUnits() {
-        isLoading = true
-        APIClient.shared.listUnits { result in
-             DispatchQueue.main.async {
-                 self.isLoading = false
-                 switch result {
-                 case .success(let response):
-                     if response.success {
-                         self.units = response.data
-                     }
-                 case .failure(let error):
-                     self.errorMessage = "\(error)"
-                 }
-             }
         }
     }
 }

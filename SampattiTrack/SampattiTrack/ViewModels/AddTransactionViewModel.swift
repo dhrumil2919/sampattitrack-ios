@@ -1,6 +1,9 @@
 import Foundation
+import SwiftData
 import Combine
 
+/// AddTransactionViewModel manages the state and logic for creating new transactions.
+/// Uses local SwiftData for offline-first operation - no API calls required.
 class AddTransactionViewModel: ObservableObject {
     @Published var description: String = ""
     @Published var note: String = ""
@@ -10,33 +13,15 @@ class AddTransactionViewModel: ObservableObject {
         EditablePosting(accountID: "", amount: "", quantity: "")
     ]
     
-    @Published var accounts: [Account] = []
-    @Published var units: [FinancialUnit] = []
-    @Published var availableTags: [Tag] = []
+    @Published var accounts: [SDAccount] = []
+    @Published var units: [SDUnit] = []
+    @Published var availableTags: [SDTag] = []
     @Published var isLoading = false
     @Published var isSaving = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
     
-    // OPTIMIZATION: Static caching to avoid redundant API calls on every view appearance
-    private static var cachedAccounts: [Account]?
-    private static var cachedUnits: [FinancialUnit]?
-    private static var cachedTags: [Tag]?
-    private static var cacheTimestamp: Date?
-    private static let cacheExpiry: TimeInterval = 300 // 5 minute cache
-    
-    private static var isCacheValid: Bool {
-        guard let timestamp = cacheTimestamp else { return false }
-        return Date().timeIntervalSince(timestamp) < cacheExpiry
-    }
-    
-    /// Clear the static cache (call when data might have changed)
-    static func invalidateCache() {
-        cachedAccounts = nil
-        cachedUnits = nil
-        cachedTags = nil
-        cacheTimestamp = nil
-    }
+    private var modelContext: ModelContext?
     
     struct EditablePosting: Identifiable {
         let id = UUID()
@@ -56,69 +41,37 @@ class AddTransactionViewModel: ObservableObject {
         abs(totalAmount) < 0.01
     }
     
-    func fetchAccounts() {
-        // Use cached data if available and valid
-        if Self.isCacheValid {
-            if let accounts = Self.cachedAccounts {
-                self.accounts = accounts
-            }
-            if let units = Self.cachedUnits {
-                self.units = units
-            }
-            if let tags = Self.cachedTags {
-                self.availableTags = tags
-            }
+    /// Set the model context for SwiftData operations
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+    }
+    
+    /// Fetch accounts, units, and tags from local SwiftData
+    func fetchLocalData() {
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
             return
         }
         
         isLoading = true
         
-        // Fetch accounts
-        APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.accounts = response.data
-                        Self.cachedAccounts = response.data
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Failed to load accounts: \(error)"
-                }
-            }
-        }
-        
-        // Fetch units
-        APIClient.shared.listUnits { (result: Result<UnitListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.units = response.data
-                        Self.cachedUnits = response.data
-                    }
-                case .failure:
-                    // Don't show error for units, just use defaults
-                    break
-                }
-            }
-        }
-        
-        // Fetch available tags
-        APIClient.shared.listTags { (result: Result<TagListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.availableTags = response.data
-                        Self.cachedTags = response.data
-                        Self.cacheTimestamp = Date() // Update timestamp after all data loaded
-                    }
-                case .failure:
-                    break
-                }
-            }
+        do {
+            // Fetch accounts
+            let accountDescriptor = FetchDescriptor<SDAccount>(sortBy: [SortDescriptor(\.name)])
+            accounts = try context.fetch(accountDescriptor)
+            
+            // Fetch units
+            let unitDescriptor = FetchDescriptor<SDUnit>(sortBy: [SortDescriptor(\.name)])
+            units = try context.fetch(unitDescriptor)
+            
+            // Fetch tags
+            let tagDescriptor = FetchDescriptor<SDTag>(sortBy: [SortDescriptor(\.name)])
+            availableTags = try context.fetch(tagDescriptor)
+            
+            isLoading = false
+        } catch {
+            errorMessage = "Failed to load data: \(error)"
+            isLoading = false
         }
     }
     
@@ -134,25 +87,15 @@ class AddTransactionViewModel: ObservableObject {
     func fetchPriceForPosting(at index: Int, date: String) {
         let unitCode = postings[index].unitCode
         guard unitCode != "INR" else {
-            // For INR, price = 1
             postings[index].price = "1"
             recalculateAmount(at: index)
             return
         }
         
-        APIClient.shared.lookupPrice(unitCode: unitCode, date: date) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.postings[index].price = response.data.price
-                        self.recalculateAmount(at: index)
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Price lookup failed: \(error)"
-                }
-            }
-        }
+        // For non-INR units, we could lookup price from a local cache
+        // For now, just set price to 1 and user can manually adjust
+        postings[index].price = "1"
+        recalculateAmount(at: index)
     }
     
     func recalculateAmount(at index: Int) {
@@ -161,6 +104,8 @@ class AddTransactionViewModel: ObservableObject {
         postings[index].amount = String(qty * price)
     }
     
+    /// Creates transaction by queuing it for offline sync
+    /// Stores raw JSON to avoid SwiftData relationship memory issues
     func createTransaction() {
         guard isBalanced else {
             errorMessage = "Transaction does not balance. Imbalance: \(CurrencyFormatter.formatCheck(abs(totalAmount)))"
@@ -172,6 +117,11 @@ class AddTransactionViewModel: ObservableObject {
             return
         }
         
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
+            return
+        }
+        
         isSaving = true
         errorMessage = nil
         
@@ -179,64 +129,41 @@ class AddTransactionViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd"
         let dateString = formatter.string(from: date)
         
-        let postingRequests = postings.map { p in
-            CreatePosting(
-                accountID: p.accountID,
-                amount: p.amount,
-                quantity: p.quantity.isEmpty ? p.amount : p.quantity,
-                unitCode: p.unitCode,
-                tags: p.tags.isEmpty ? nil : p.tags
-            )
+        let transactionID = UUID()
+        let postingsJSON = postings.map { p in
+            [
+                "id": UUID().uuidString,
+                "account_id": p.accountID,
+                "amount": p.amount,
+                "quantity": p.quantity.isEmpty ? p.amount : p.quantity,
+                "unit_code": p.unitCode
+            ] as [String: Any]
         }
         
-        let request = CreateTransactionRequest(
-            date: dateString,
-            description: description,
-            note: note,
-            postings: postingRequests
-        )
-
-        APIClient.shared.request("/transactions", method: "POST", body: request) { (result: Result<TransactionResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isSaving = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.successMessage = "Transaction Created!"
-                    } else {
-                        self.errorMessage = "Failed to create transaction"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error)"
-                }
-            }
+        do {
+            try OfflineQueueHelper.queueTransaction(
+                id: transactionID,
+                date: dateString,
+                description: description,
+                note: note.isEmpty ? nil : note,
+                postings: postingsJSON,
+                context: context
+            )
+            
+            isSaving = false
+            successMessage = "Transaction Queued for Sync!"
+            
+            // Reset form
+            description = ""
+            note = ""
+            date = Date()
+            postings = [
+                EditablePosting(accountID: "", amount: "", quantity: ""),
+                EditablePosting(accountID: "", amount: "", quantity: "")
+            ]
+        } catch {
+            isSaving = false
+            errorMessage = "Failed to queue transaction: \(error)"
         }
     }
-}
-
-struct CreateTransactionRequest: Codable {
-    let date: String
-    let description: String
-    let note: String
-    let postings: [CreatePosting]
-}
-
-struct CreatePosting: Codable {
-    let accountID: String
-    let amount: String
-    let quantity: String
-    let unitCode: String?
-    let tags: [String]?
-    
-    enum CodingKeys: String, CodingKey {
-        case accountID = "account_id"
-        case amount
-        case quantity
-        case unitCode = "unit_code"
-        case tags
-    }
-}
-
-struct TransactionResponse: Codable {
-    let success: Bool
 }

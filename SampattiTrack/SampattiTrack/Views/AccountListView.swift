@@ -50,7 +50,7 @@ struct AccountListView: View {
                              Text("No accounts found")
                              Button("Sync Accounts") {
                                  Task {
-                                     await syncManager.pullAccounts()
+                                     await syncManager.syncAll()
                                  }
                              }
                              Spacer()
@@ -87,7 +87,7 @@ struct AccountListView: View {
                 .navigationTitle("Accounts")
                 .searchable(text: $searchText, prompt: "Search accounts...")
                 .refreshable {
-                    await syncManager.pullAccounts()
+                    await syncManager.syncAll()
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -127,21 +127,9 @@ struct AccountRowView: View {
                 .background(Color.blue.opacity(0.1))
                 .cornerRadius(10)
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text(account.name)
-                    .font(.headline)
-                HStack(spacing: 4) {
-                    Text(account.type)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("•")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(account.currency ?? "INR")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+            // Display ID which is in category:parent:name format
+            Text(account.id)
+                .font(.headline)
             
             Spacer()
             

@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var syncManager: SyncManager
     @StateObject private var authManager = AuthManager.shared
     @State private var isConfigured: Bool = false
+    @State private var hasPerformedInitialSync: Bool = false
     
     var body: some View {
         Group {
@@ -36,10 +37,11 @@ struct ContentView: View {
                             }
                     }
                     .task {
-                        // Trigger initial sync if authenticated
-                         if authManager.isAuthenticated {
-                             await syncManager.syncAll()
-                         }
+                        // First sync after login should do full cleanup
+                        if !hasPerformedInitialSync {
+                            await syncManager.initialSync()
+                            hasPerformedInitialSync = true
+                        }
                     }
                 } else {
                     VStack {
@@ -60,6 +62,12 @@ struct ContentView: View {
              } else {
                  isConfigured = false
              }
+        }
+        .onChange(of: authManager.isAuthenticated) {
+            // Reset initial sync tracking when logging out
+            if !authManager.isAuthenticated {
+                hasPerformedInitialSync = false
+            }
         }
     }
 }

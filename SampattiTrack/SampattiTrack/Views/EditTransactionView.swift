@@ -1,21 +1,25 @@
 import SwiftUI
+import SwiftData
 import Combine
 
+/// EditTransactionViewModel - OFFLINE-FIRST
+/// Uses local SwiftData, saves changes locally with isSynced=false
 class EditTransactionViewModel: ObservableObject {
     @Published var date: Date = Date()
     @Published var description: String = ""
     @Published var note: String = ""
     @Published var postings: [EditablePosting] = []
     
-    @Published var accounts: [Account] = []
-    @Published var units: [FinancialUnit] = []
-    @Published var availableTags: [Tag] = []
+    @Published var accounts: [SDAccount] = []
+    @Published var units: [SDUnit] = []
+    @Published var availableTags: [SDTag] = []
     @Published var isLoading = false
     @Published var isSaving = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
     
     let transactionID: UUID
+    private var modelContext: ModelContext?
     
     struct EditablePosting: Identifiable {
         let id = UUID()
@@ -32,28 +36,18 @@ class EditTransactionViewModel: ObservableObject {
         self.description = transaction.description
         self.note = transaction.note ?? ""
         
-        // Try multiple date formats
-        let formats = ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss.SSSZ"]
+        // Parse date
+        let formats = ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ssZ"]
         var parsedDate: Date? = nil
-        
         for format in formats {
             let formatter = DateFormatter()
             formatter.dateFormat = format
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
             if let d = formatter.date(from: transaction.date) {
                 parsedDate = d
                 break
             }
         }
-        
-        // Fallback: try ISO8601DateFormatter
-        if parsedDate == nil {
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            parsedDate = isoFormatter.date(from: transaction.date)
-        }
-        
         self.date = parsedDate ?? Date()
         
         self.postings = transaction.postings.map { p in
@@ -71,101 +65,32 @@ class EditTransactionViewModel: ObservableObject {
         }
     }
     
-    func fetchAccounts() {
-        isLoading = true
-        
-        // Fetch accounts
-        APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.accounts = response.data
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Failed to load accounts: \(error.localizedDescription)"
-                }
-            }
-        }
-        
-        // Fetch units
-        APIClient.shared.listUnits { (result: Result<UnitListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.units = response.data
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        // Fetch available tags
-        APIClient.shared.listTags { (result: Result<TagListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.availableTags = response.data
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        // Fetch fresh transaction data from API to get tags (local SwiftData doesn't store tags)
-        APIClient.shared.request("/transactions/\(transactionID.uuidString)") { (result: Result<SingleTransactionResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        // Update postings with fresh data including tags
-                        self.postings = response.data.postings.map { p in
-                            let qty = p.quantity ?? p.amount
-                            let price = p.unitCode == "INR" || p.unitCode == nil ? "1" :
-                                (abs(Double(p.amount) ?? 0) / abs(Double(qty) ?? 1)).description
-                            return EditablePosting(
-                                accountID: p.accountID,
-                                amount: p.amount,
-                                quantity: qty,
-                                unitCode: p.unitCode ?? "INR",
-                                price: price,
-                                tags: p.tags?.map { $0.name } ?? []
-                            )
-                        }
-                    }
-                case .failure:
-                    // Keep local data if API fails
-                    break
-                }
-            }
-        }
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
     }
     
-    func fetchPriceForPosting(at index: Int, date: String) {
-        let unitCode = postings[index].unitCode
-        guard unitCode != "INR" else {
-            postings[index].price = "1"
-            recalculateAmount(at: index)
+    /// Fetch accounts, units, tags from LOCAL SwiftData - no API calls
+    func fetchLocalData() {
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
             return
         }
+        isLoading = true
         
-        APIClient.shared.lookupPrice(unitCode: unitCode, date: date) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.postings[index].price = response.data.price
-                        self.recalculateAmount(at: index)
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Price lookup failed: \(error)"
-                }
-            }
+        do {
+            let accountDescriptor = FetchDescriptor<SDAccount>(sortBy: [SortDescriptor(\.name)])
+            accounts = try context.fetch(accountDescriptor)
+            
+            let unitDescriptor = FetchDescriptor<SDUnit>(sortBy: [SortDescriptor(\.name)])
+            units = try context.fetch(unitDescriptor)
+            
+            let tagDescriptor = FetchDescriptor<SDTag>(sortBy: [SortDescriptor(\.name)])
+            availableTags = try context.fetch(tagDescriptor)
+            
+            isLoading = false
+        } catch {
+            errorMessage = "Failed to load data: \(error)"
+            isLoading = false
         }
     }
     
@@ -175,58 +100,64 @@ class EditTransactionViewModel: ObservableObject {
         postings[index].amount = String(qty * price)
     }
     
+    /// Save changes to LOCAL SwiftData - no API call
     func save() {
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
+            return
+        }
+        
         isSaving = true
         errorMessage = nil
-        
-        // Validation: Check balance?
-        // Let's rely on backend validation or add simple check here if needed.
         
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         let dateStr = formatter.string(from: date)
         
-        struct UpdatePostingRequest: Encodable {
-            let account_id: String
-            let amount: String
-            let quantity: String
-            let unit_code: String?
-            let tags: [String]?
-        }
-
-        struct UpdateTransactionRequest: Encodable {
-            let date: String
-            let description: String
-            let note: String
-            let postings: [UpdatePostingRequest]
-        }
+        // Find existing transaction
+        let txId = transactionID
+        let descriptor = FetchDescriptor<SDTransaction>(predicate: #Predicate { $0.id == txId })
         
-        let postingRequests = postings.map { p in
-            UpdatePostingRequest(
-                account_id: p.accountID,
-                amount: p.amount,
-                quantity: p.quantity.isEmpty ? "0" : p.quantity,
-                unit_code: p.unitCode,
-                tags: p.tags.isEmpty ? nil : p.tags
-            )
-        }
-        
-        let req = UpdateTransactionRequest(date: dateStr, description: description, note: note, postings: postingRequests)
-        
-        APIClient.shared.request("/transactions/\(transactionID.uuidString)", method: "PUT", body: req) { (result: Result<TransactionResponse, APIClient.APIError>) in
-             DispatchQueue.main.async {
-                self.isSaving = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.successMessage = "Transaction updated!"
-                    } else {
-                        self.errorMessage = "Failed to update"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error.localizedDescription)"
+        do {
+            if let existing = try context.fetch(descriptor).first {
+                // Update existing transaction
+                existing.date = dateStr
+                existing.desc = description
+                existing.note = note.isEmpty ? nil : note
+                existing.isSynced = false  // Mark for sync
+                existing.updatedAt = Date()
+                
+                // Fetch tags for linking
+                let tagDescriptor = FetchDescriptor<SDTag>()
+                let allTags = try context.fetch(tagDescriptor)
+                let tagMap = Dictionary(uniqueKeysWithValues: allTags.map { ($0.name, $0) })
+                
+                // Recreate postings
+                var newPostings: [SDPosting] = []
+                for p in postings {
+                    let postingTags = p.tags.compactMap { tagMap[$0] }
+                    let posting = SDPosting(
+                        id: UUID(),
+                        accountID: p.accountID,
+                        amount: p.amount,
+                        quantity: p.quantity.isEmpty ? p.amount : p.quantity,
+                        unitCode: p.unitCode,
+                        tags: postingTags.isEmpty ? nil : postingTags
+                    )
+                    newPostings.append(posting)
                 }
+                existing.postings = newPostings
+                
+                try context.save()
+                isSaving = false
+                successMessage = "Transaction updated!"
+            } else {
+                errorMessage = "Transaction not found locally"
+                isSaving = false
             }
+        } catch {
+            errorMessage = "Failed to save: \(error)"
+            isSaving = false
         }
     }
 }
@@ -234,6 +165,7 @@ class EditTransactionViewModel: ObservableObject {
 struct EditTransactionView: View {
     @StateObject private var viewModel: EditTransactionViewModel
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.modelContext) private var modelContext
     
     init(transaction: Transaction) {
         _viewModel = StateObject(wrappedValue: EditTransactionViewModel(transaction: transaction))
@@ -250,15 +182,25 @@ struct EditTransactionView: View {
             Section(header: Text("Postings (Splits)")) {
                 ForEach($viewModel.postings) { $posting in
                     VStack(alignment: .leading, spacing: 8) {
-                        // Account Selector - DEBUG: Show ID only
-                        NavigationLink(destination: SearchableAccountPicker(
-                            title: "Select Account",
-                            selection: $posting.accountID,
-                            accounts: viewModel.accounts
-                        )) {
-                            Text(posting.accountID)
-                                .font(.caption)
-                                .foregroundColor(.orange)
+                        // Account Selector
+                        if let account = viewModel.accounts.first(where: { $0.id == posting.accountID }) {
+                            NavigationLink(destination: LocalAccountPicker(
+                                title: "Select Account",
+                                selection: $posting.accountID,
+                                accounts: viewModel.accounts
+                            )) {
+                                Text(account.name)
+                                    .foregroundColor(.primary)
+                            }
+                        } else {
+                            NavigationLink(destination: LocalAccountPicker(
+                                title: "Select Account",
+                                selection: $posting.accountID,
+                                accounts: viewModel.accounts
+                            )) {
+                                Text("Select Account")
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         
                         // Unit Picker
@@ -267,21 +209,18 @@ struct EditTransactionView: View {
                             set: { newValue in
                                 if let index = viewModel.postings.firstIndex(where: { $0.id == posting.id }) {
                                     viewModel.postings[index].unitCode = newValue
-                                    let formatter = DateFormatter()
-                                    formatter.dateFormat = "yyyy-MM-dd"
-                                    let dateString = formatter.string(from: viewModel.date)
-                                    viewModel.fetchPriceForPosting(at: index, date: dateString)
+                                    viewModel.postings[index].price = "1"
+                                    viewModel.recalculateAmount(at: index)
                                 }
                             }
                         )) {
-                            ForEach(viewModel.units) { unit in
+                            ForEach(viewModel.units, id: \.code) { unit in
                                 Text("\(unit.code) - \(unit.name)").tag(unit.code)
                             }
                         }
                         .pickerStyle(.menu)
                         
                         HStack {
-                            // Quantity
                             TextField("Quantity", text: Binding(
                                 get: { posting.quantity },
                                 set: { newValue in
@@ -295,24 +234,20 @@ struct EditTransactionView: View {
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .frame(width: 80)
                             
-                            // Price indicator
                             Text("@ \(posting.price)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .frame(width: 60, alignment: .leading)
                             
-                            // Amount (read-only, auto-calculated)
                             TextField("Amount", text: .constant(posting.amount))
                                 .disabled(true)
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
                                 .foregroundColor(Double(posting.amount) ?? 0 < 0 ? .red : .green)
                                 .opacity(0.7)
-                            
-
                         }
                         
                         // Tags Section
-                        TagsEditorView(
+                        LocalTagsEditorView(
                             tags: Binding(
                                 get: { posting.tags },
                                 set: { newTags in
@@ -332,7 +267,6 @@ struct EditTransactionView: View {
                     }
                 }
                 
-                // Add Posting Button
                 Button(action: {
                     viewModel.postings.append(EditTransactionViewModel.EditablePosting(accountID: "", amount: "", quantity: ""))
                 }) {
@@ -369,107 +303,8 @@ struct EditTransactionView: View {
             }
         }
         .onAppear {
-            viewModel.fetchAccounts()
+            viewModel.setModelContext(modelContext)
+            viewModel.fetchLocalData()
         }
-    }
-}
-
-// MARK: - Tags Editor View
-struct TagsEditorView: View {
-    @Binding var tags: [String]
-    let availableTags: [Tag]
-    
-    @State private var selectedTag: String = ""
-    
-    var unselectedTags: [Tag] {
-        availableTags.filter { !tags.contains($0.name) }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Tags")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                // Tag Picker
-                if !unselectedTags.isEmpty {
-                    Menu {
-                        ForEach(unselectedTags) { tag in
-                            Button(tag.name) {
-                                tags.append(tag.name)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Add")
-                        }
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                    }
-                    .accessibilityLabel("Add tag")
-                }
-            }
-            
-            // Selected Tags as Chips
-            if !tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(tags, id: \.self) { tagName in
-                            TagChip(
-                                name: tagName,
-                                color: availableTags.first(where: { $0.name == tagName })?.color,
-                                onRemove: {
-                                    tags.removeAll { $0 == tagName }
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Tag Chip
-struct TagChip: View {
-    let name: String
-    let color: String?
-    let onRemove: () -> Void
-    
-    var chipColor: Color {
-        if let hex = color {
-            return Color(hex: hex) ?? .blue
-        }
-        return .blue
-    }
-    
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(chipColor)
-                .frame(width: 6, height: 6)
-            
-            Text(name)
-                .font(.caption)
-            
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .accessibilityLabel("Remove \(name) tag")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(chipColor.opacity(0.15))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(chipColor.opacity(0.3), lineWidth: 1)
-        )
     }
 }

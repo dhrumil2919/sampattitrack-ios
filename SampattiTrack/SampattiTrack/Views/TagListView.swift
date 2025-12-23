@@ -1,17 +1,19 @@
 import SwiftUI
+import SwiftData
 
+/// TagListView - OFFLINE-FIRST
+/// Uses @Query for local SDTag data. No API calls.
 struct TagListView: View {
-    @StateObject private var viewModel = TagListViewModel()
+    @Query(sort: \SDTag.name) private var tags: [SDTag]
+    @Environment(\.modelContext) private var modelContext
+    
     @State private var showingCreateSheet = false
-    @State private var editingTag: Tag? = nil
+    @State private var editingTag: SDTag? = nil
     
     var body: some View {
         NavigationView {
             Group {
-                if viewModel.isLoading && viewModel.tags.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.tags.isEmpty {
+                if tags.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "tag.slash")
                             .font(.system(size: 48))
@@ -30,8 +32,8 @@ struct TagListView: View {
                     .padding()
                 } else {
                     List {
-                        ForEach(viewModel.tags) { tag in
-                            TagRowView(tag: tag)
+                        ForEach(tags) { tag in
+                            SDTagRowView(tag: tag)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     editingTag = tag
@@ -39,9 +41,10 @@ struct TagListView: View {
                         }
                         .onDelete { indexSet in
                             for index in indexSet {
-                                let tag = viewModel.tags[index]
-                                viewModel.deleteTag(id: tag.id) { _ in }
+                                let tag = tags[index]
+                                modelContext.delete(tag)
                             }
+                            try? modelContext.save()
                         }
                     }
                     .listStyle(.insetGrouped)
@@ -58,14 +61,19 @@ struct TagListView: View {
                 }
             }
             .sheet(isPresented: $showingCreateSheet) {
-                TagEditSheet(
+                SDTagEditSheet(
                     tag: nil,
                     onSave: { name, description, color in
-                        viewModel.createTag(name: name, description: description, color: color) { success in
-                            if success {
-                                showingCreateSheet = false
-                            }
-                        }
+                        let newTag = SDTag(
+                            id: UUID().uuidString,
+                            name: name,
+                            desc: description,
+                            color: color,
+                            isSynced: false
+                        )
+                        modelContext.insert(newTag)
+                        try? modelContext.save()
+                        showingCreateSheet = false
                     },
                     onCancel: {
                         showingCreateSheet = false
@@ -73,34 +81,29 @@ struct TagListView: View {
                 )
             }
             .sheet(item: $editingTag) { tag in
-                TagEditSheet(
+                SDTagEditSheet(
                     tag: tag,
                     onSave: { name, description, color in
-                        viewModel.updateTag(id: tag.id, name: name, description: description, color: color) { success in
-                            if success {
-                                editingTag = nil
-                            }
-                        }
+                        tag.name = name
+                        tag.desc = description
+                        tag.color = color
+                        tag.isSynced = false
+                        try? modelContext.save()
+                        editingTag = nil
                     },
                     onCancel: {
                         editingTag = nil
                     }
                 )
             }
-            .onAppear {
-                viewModel.fetchTags()
-            }
-            .refreshable {
-                viewModel.fetchTags()
-            }
         }
     }
 }
 
-// MARK: - Tag Row View
+// MARK: - SDTag Row View
 
-struct TagRowView: View {
-    let tag: Tag
+struct SDTagRowView: View {
+    let tag: SDTag
     
     var tagColor: Color {
         if let colorHex = tag.color {
@@ -118,7 +121,7 @@ struct TagRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(tag.name)
                     .font(.headline)
-                if let description = tag.description, !description.isEmpty {
+                if let description = tag.desc, !description.isEmpty {
                     Text(description)
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -136,10 +139,10 @@ struct TagRowView: View {
     }
 }
 
-// MARK: - Tag Edit Sheet
+// MARK: - SDTag Edit Sheet
 
-struct TagEditSheet: View {
-    let tag: Tag?
+struct SDTagEditSheet: View {
+    let tag: SDTag?
     let onSave: (String, String?, String?) -> Void
     let onCancel: () -> Void
     
@@ -196,7 +199,7 @@ struct TagEditSheet: View {
             .onAppear {
                 if let tag = tag {
                     name = tag.name
-                    description = tag.description ?? ""
+                    description = tag.desc ?? ""
                     if let colorHex = tag.color {
                         selectedColor = Color(hex: colorHex) ?? .blue
                     }

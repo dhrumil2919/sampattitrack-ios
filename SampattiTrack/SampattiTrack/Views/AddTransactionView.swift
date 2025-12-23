@@ -1,8 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct AddTransactionView: View {
     @StateObject private var viewModel = AddTransactionViewModel()
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.modelContext) private var modelContext
     
     var body: some View {
         Form {
@@ -17,87 +19,29 @@ struct AddTransactionView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                ForEach(Array(viewModel.postings.enumerated()), id: \.element.id) { index, posting in
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Account Selector
-                        if let account = viewModel.accounts.first(where: { $0.id == posting.accountID }) {
-                            NavigationLink(destination: SearchableAccountPicker(
-                                title: "Select Account",
-                                selection: Binding(
-                                    get: { viewModel.postings[index].accountID },
-                                    set: { viewModel.postings[index].accountID = $0 }
-                                ),
-                                accounts: viewModel.accounts
-                            )) {
-                                Text(account.name)
-                                    .foregroundColor(.primary)
-                            }
-                        } else {
-                            NavigationLink(destination: SearchableAccountPicker(
-                                title: "Select Account",
-                                selection: Binding(
-                                    get: { viewModel.postings[index].accountID },
-                                    set: { viewModel.postings[index].accountID = $0 }
-                                ),
-                                accounts: viewModel.accounts
-                            )) {
-                                Text("Select Account")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        // Unit Picker
-                        Picker("Unit", selection: Binding(
-                            get: { viewModel.postings[index].unitCode },
-                            set: { newValue in
-                                viewModel.postings[index].unitCode = newValue
+                ForEach($viewModel.postings) { $posting in
+                    PostingRowView(
+                        posting: $posting,
+                        accounts: viewModel.accounts,
+                        units: viewModel.units,
+                        availableTags: viewModel.availableTags,
+                        date: viewModel.date,
+                        onUnitChange: { newUnit in
+                            posting.unitCode = newUnit
+                            if let idx = viewModel.postings.firstIndex(where: { $0.id == posting.id }) {
                                 let formatter = DateFormatter()
                                 formatter.dateFormat = "yyyy-MM-dd"
                                 let dateString = formatter.string(from: viewModel.date)
-                                viewModel.fetchPriceForPosting(at: index, date: dateString)
+                                viewModel.fetchPriceForPosting(at: idx, date: dateString)
                             }
-                        )) {
-                            ForEach(viewModel.units) { unit in
-                                Text("\(unit.code) - \(unit.name)").tag(unit.code)
+                        },
+                        onQuantityChange: { newQty in
+                            posting.quantity = newQty
+                            if let idx = viewModel.postings.firstIndex(where: { $0.id == posting.id }) {
+                                viewModel.recalculateAmount(at: idx)
                             }
                         }
-                        .pickerStyle(.menu)
-                        
-                        HStack {
-                            // Quantity
-                            TextField("Quantity", text: Binding(
-                                get: { viewModel.postings[index].quantity },
-                                set: { newValue in
-                                    viewModel.postings[index].quantity = newValue
-                                    viewModel.recalculateAmount(at: index)
-                                }
-                            ))
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .frame(width: 80)
-                            
-                            // Price indicator
-                            Text("@ \(viewModel.postings[index].price)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .frame(width: 60, alignment: .leading)
-                            
-                            // Amount (read-only, auto-calculated)
-                            TextField("Amount", text: .constant(viewModel.postings[index].amount))
-                                .disabled(true)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .foregroundColor(Double(posting.amount) ?? 0 < 0 ? .red : .green)
-                                .opacity(0.7)
-                            
-
-                        }
-                        
-                        // Tags Section
-                        TagsEditorView(
-                            tags: $viewModel.postings[index].tags,
-                            availableTags: viewModel.availableTags
-                        )
-                    }
+                    )
                     .padding(.vertical, 4)
                 }
                 .onDelete { indexSet in
@@ -156,7 +100,8 @@ struct AddTransactionView: View {
         }
         .navigationTitle("Add Transaction")
         .onAppear {
-            viewModel.fetchAccounts()
+            viewModel.setModelContext(modelContext)
+            viewModel.fetchLocalData()
         }
         .onChange(of: viewModel.successMessage) {
             if viewModel.successMessage != nil {

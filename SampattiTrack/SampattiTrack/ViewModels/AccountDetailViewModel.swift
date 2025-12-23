@@ -1,80 +1,73 @@
 import Foundation
+import SwiftData
 import Combine
 
+/// Simple history point for account balance over time  
+struct BalanceHistoryPoint: Identifiable {
+    var id: String { date }
+    let date: String
+    let balance: Double
+}
+
+/// AccountDetailViewModel - OFFLINE-FIRST
+/// Uses local SwiftData for account details. No API calls.
 class AccountDetailViewModel: ObservableObject {
-    @Published var balance: String = "0.00"
-    @Published var history: [AccountHistoryPoint] = []
+    @Published var balance: Double = 0
+    @Published var historyData: [BalanceHistoryPoint] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    private let accountID: String
+    let accountID: String
+    private var container: ModelContainer?
     
     init(accountID: String) {
         self.accountID = accountID
     }
     
-    func fetchDetails() {
-        isLoading = true
-        errorMessage = nil
+    func setContainer(_ container: ModelContainer) {
+        self.container = container
+        fetchBalance()
+    }
+    
+    /// Fetch balance from LOCAL transactions - no API call
+    func fetchBalance() {
+        guard let container = container else { return }
         
-        let dispatchGroup = DispatchGroup()
-        
-        // Fetch Balance from API
-        dispatchGroup.enter()
-        APIClient.shared.request("/accounts/\(accountID)/balance") { (result: Result<BalanceResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.balance = response.data.balance
+        Task.detached(priority: .userInitiated) {
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            
+            // Calculate balance from local transactions
+            let descriptor = FetchDescriptor<SDTransaction>()
+            let transactions = (try? context.fetch(descriptor)) ?? []
+            
+            var total: Double = 0
+            var history: [BalanceHistoryPoint] = []
+            var runningBalance: Double = 0
+            
+            // Sort transactions by date
+            let sortedTx = transactions.sorted { $0.date < $1.date }
+            
+            for tx in sortedTx {
+                for posting in tx.postings ?? [] {
+                    if posting.accountID == self.accountID {
+                        let amount = Double(posting.amount) ?? 0
+                        total += amount
+                        runningBalance += amount
                     }
-                case .failure(let error):
-                    print("Error fetching balance: \(error)")
                 }
-                dispatchGroup.leave()
-            }
-        }
-        
-        // Fetch History from API
-        dispatchGroup.enter()
-        APIClient.shared.request("/accounts/\(accountID)/history?interval=daily") { (result: Result<HistoryResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                     if response.success {
-                         self.history = response.data
-                     }
-                case .failure(let error):
-                     print("Error fetching history: \(error)")
+                // Add history point for transactions involving this account
+                let hasAccount = tx.postings?.contains { $0.accountID == self.accountID } ?? false
+                if hasAccount {
+                    history.append(BalanceHistoryPoint(date: tx.date, balance: runningBalance))
                 }
-                dispatchGroup.leave()
             }
-        }
-        
-        dispatchGroup.notify(queue: .main) {
-            self.isLoading = false
+            
+            await MainActor.run {
+                self.balance = total
+                self.historyData = Array(history.suffix(30))
+                self.isLoading = false
+            }
         }
     }
-}
-
-struct BalanceResponse: Codable {
-    let success: Bool
-    let data: BalanceData
-}
-
-struct BalanceData: Codable {
-    let balance: String
-    let currency: String?
-}
-
-struct HistoryResponse: Codable {
-    let success: Bool
-    let data: [AccountHistoryPoint]
-}
-
-struct AccountHistoryPoint: Codable, Identifiable {
-    let date: String
-    let balance: String
-    
-    var id: String { date }
 }
