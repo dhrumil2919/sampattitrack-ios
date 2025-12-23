@@ -64,20 +64,26 @@ class OfflineQueueHelper {
         name: String,
         category: String,
         type: String,
-        currency: String?,  // Optional
+        currency: String?,
         icon: String?,
         parentID: String?,
+        relatedAccountId: String?,
+        metadata: [String: Any]?,
         context: ModelContext
     ) throws {
-        let accountJSON: [String: Any] = [
+        var accountJSON: [String: Any] = [
             "id": id,
             "name": name,
             "category": category,
-            "type": type,
-            "currency": currency as Any,
-            "icon": icon as Any,
-            "parent_id": parentID as Any
+            "type": type
         ]
+        
+        // Add optional fields only if not nil
+        if let currency = currency { accountJSON["currency"] = currency }
+        if let icon = icon { accountJSON["icon"] = icon }
+        if let parentID = parentID { accountJSON["parent_id"] = parentID }
+        if let relatedAccountId = relatedAccountId { accountJSON["related_account_id"] = relatedAccountId }
+        if let metadata = metadata { accountJSON["metadata"] = metadata }
         
         try queueOperation(
             operationType: "CREATE_ACCOUNT",
@@ -93,20 +99,25 @@ class OfflineQueueHelper {
         name: String,
         category: String,
         type: String,
-        currency: String?,  // Optional
+        currency: String?,
         icon: String?,
         parentID: String?,
+        relatedAccountId: String?,
+        metadata: [String: Any]?,
         context: ModelContext
     ) throws {
-        let accountJSON: [String: Any] = [
+        var accountJSON: [String: Any] = [
             "id": id,
             "name": name,
             "category": category,
-            "type": type,
-            "currency": currency as Any,
-            "icon": icon as Any,
-            "parent_id": parentID as Any
+            "type": type
         ]
+        
+        if let currency = currency { accountJSON["currency"] = currency }
+        if let icon = icon { accountJSON["icon"] = icon }
+        if let parentID = parentID { accountJSON["parent_id"] = parentID }
+        if let relatedAccountId = relatedAccountId { accountJSON["related_account_id"] = relatedAccountId }
+        if let metadata = metadata { accountJSON["metadata"] = metadata }
         
         try queueOperation(
             operationType: "UPDATE_ACCOUNT",

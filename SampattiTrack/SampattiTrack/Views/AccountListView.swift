@@ -140,11 +140,3 @@ struct AccountRowView: View {
         .padding(.vertical, 4)
     }
 }
-
-// MARK: - Add Account View (Placeholder)
-struct AddAccountView: View {
-    var body: some View {
-        Text("Add Account Coming Soon")
-            .navigationTitle("Add Account")
-    }
-}

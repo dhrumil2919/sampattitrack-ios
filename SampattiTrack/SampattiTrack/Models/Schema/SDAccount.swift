@@ -18,7 +18,11 @@ class SDAccount {
     // Additional metadata storage (JSON)
     var metadata: Data?
     
-    init(id: String, name: String, category: String, type: String, currency: String? = nil, icon: String? = nil, parentID: String? = nil, metadata: Data? = nil) {
+    // Cached XIRR value (fetched from API, stored locally)
+    var cachedXIRR: Double?
+    var xirrCachedAt: Date?
+    
+    init(id: String, name: String, category: String, type: String, currency: String? = nil, icon: String? = nil, parentID: String? = nil, metadata: Data? = nil, isSynced: Bool = true) {
         self.id = id
         self.name = name
         self.category = category
@@ -27,6 +31,7 @@ class SDAccount {
         self.icon = icon
         self.parentID = parentID
         self.metadata = metadata
+        self.isSynced = isSynced
         self.updatedAt = Date()
     }
     
