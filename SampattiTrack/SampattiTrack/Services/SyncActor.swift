@@ -82,12 +82,37 @@ struct UnitDTO: Codable, Sendable {
 }
 
 struct PriceDTO: Codable, Sendable {
-    let id: UUID
-    let commodity: String
-    let date: String
-    let price: String
+    let commodity_id: String
+    let commodity_name: String
+    let type: String
+    let last_date: String
+    let last_price: String
+    let one_day_change: String?
+    let one_week_change: String?
+    let one_month_change: String?
+    let one_year_change: String?
+    let ytd_change: String?
+}
+
+struct PortfolioItemDTO: Codable, Sendable {
+    let account_id: String
+    let account_name: String
+    let type: String
+    let category: String
     let currency: String
-    let source: String?
+    let symbol: String?
+    let quantity: String
+    let invested_amount: String
+    let current_value: String
+    let absolute_return: String
+    let xirr: Double
+}
+
+struct NetWorthHistoryDTO: Codable, Sendable {
+    let date: String
+    let net_worth: String
+    let assets: String
+    let liabilities: String
 }
 
 struct SyncResponseDTO: Codable {
@@ -269,6 +294,8 @@ actor SyncActor {
         let units = try await fetchUnits()
         let transactions = try await fetchTransactions()
         let prices = try await fetchPrices()
+        let portfolio = try await fetchPortfolioAnalysis()
+        let netWorthHistory = try await fetchNetWorthHistory()
         
         print("[SyncActor] Upserting data (incremental sync)...")
         // Use upsert instead of delete-all to prevent data invalidation
@@ -276,6 +303,8 @@ actor SyncActor {
         try upsertAccounts(accounts)
         try upsertUnits(units)
         try upsertPrices(prices)
+        try upsertPortfolioXIRR(portfolio)
+        try cacheNetWorthHistory(netWorthHistory)
         try upsertTransactions(transactions)
         
         print("[SyncActor] Pull complete")
@@ -530,29 +559,86 @@ actor SyncActor {
         for priceDTO in prices {
             // Check if price exists for this unit+date combination
             let fetchDesc = FetchDescriptor<SDPrice>(
-                predicate: #Predicate { $0.unitCode == priceDTO.commodity && $0.date == priceDTO.date }
+                predicate: #Predicate { $0.unitCode == priceDTO.commodity_id && $0.date == priceDTO.last_date }
             )
             
             if let existing = try? modelContext.fetch(fetchDesc).first {
                 // Update existing price
-                existing.price = priceDTO.price
-                existing.currency = priceDTO.currency
-                existing.source = priceDTO.source
+                existing.price = priceDTO.last_price
+                existing.currency = "INR"  // Prices from stats are in INR
             } else {
                 // Insert new price
                 let newPrice = SDPrice(
-                    id: priceDTO.id,
-                    unitCode: priceDTO.commodity,
-                    date: priceDTO.date,
-                    price: priceDTO.price,
-                    currency: priceDTO.currency,
-                    source: priceDTO.source
+                    unitCode: priceDTO.commodity_id,
+                    date: priceDTO.last_date,
+                    price: priceDTO.last_price,
+                    currency: "INR",
+                    source: "stats"
                 )
                 modelContext.insert(newPrice)
             }
         }
         try modelContext.save()
         print("[SyncActor] Upserted \(prices.count) prices")
+    }
+    
+    nonisolated private func fetchPortfolioAnalysis() async throws -> [PortfolioItemDTO] {
+        struct PortfolioResponse: Codable {
+            let success: Bool
+            let data: [PortfolioItemDTO]
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/portfolio", method: "GET") { (result: Result<PortfolioResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func upsertPortfolioXIRR(_ portfolio: [PortfolioItemDTO]) throws {
+        print("[SyncActor] Upserting portfolio metrics for \(portfolio.count) accounts...")
+        
+        for item in portfolio {
+            print("[SyncActor]   - Account: \(item.account_name)")
+            print("[SyncActor]     XIRR: \(item.xirr)")
+            print("[SyncActor]     Invested: \(item.invested_amount)")
+            print("[SyncActor]     Current: \(item.current_value)")
+            print("[SyncActor]     Return: \(item.absolute_return)")
+            
+            // Update cached XIRR and metrics in SDAccount
+            let fetchDesc = FetchDescriptor<SDAccount>(
+                predicate: #Predicate { $0.id == item.account_id }
+            )
+            
+            if let existing = try? modelContext.fetch(fetchDesc).first {
+                existing.cachedXIRR = item.xirr
+                existing.xirrCachedAt = Date()
+                
+                // Also cache portfolio metrics in metadata for dashboard display
+                // Get existing metadata dictionary or create new one
+                var metaDict = existing.metadataDictionary ?? [:]
+                metaDict["invested_amount"] = item.invested_amount
+                metaDict["current_value"] = item.current_value
+                metaDict["absolute_return"] = item.absolute_return
+                
+                // Encode back to Data
+                if let jsonData = try? JSONSerialization.data(withJSONObject: metaDict) {
+                    existing.metadata = jsonData
+                    print("[SyncActor]     ✓ Updated account \(existing.name)")
+                } else {
+                    print("[SyncActor]     ✗ Failed to encode metadata for \(existing.name)")
+                }
+            } else {
+                print("[SyncActor]     ✗ Account not found: \(item.account_id)")
+            }
+        }
+        try modelContext.save()
+        print("[SyncActor] Upserted portfolio metrics for \(portfolio.count) accounts")
     }
     
     private func upsertTransactions(_ transactions: [TransactionDTO]) throws {
@@ -649,79 +735,39 @@ actor SyncActor {
         print("[SyncActor] Upserted transactions: \(inserted) inserted, \(skipped) skipped (already exist)")
     }
     
-    /// DEPRECATED: Replaced by upsertTransactions
-    private func insertTransactions(_ transactions: [TransactionDTO]) throws {
-        print("[SyncActor] Inserting \(transactions.count) transactions...")
+    // MARK: - Net Worth History
+    
+    nonisolated private func fetchNetWorthHistory() async throws -> [NetWorthHistoryDTO] {
+        struct NetWorthResponse: Codable {
+            let success: Bool
+            let data: [NetWorthHistoryDTO]
+        }
         
-        // Process in tiny batches with autoreleasepool
-        let batchSize = 10
-        var processed = 0
-        
-        for batch in transactions.chunked(into: batchSize) {
-            autoreleasepool {
-                // Fetch ALL tags fresh for this batch to avoid stale references
-                let allTagsDesc = FetchDescriptor<SDTag>()
-                let allTags = (try? modelContext.fetch(allTagsDesc)) ?? []
-                let tagsByID = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
-                
-                for txDTO in batch {
-                    let tx = SDTransaction(
-                        id: txDTO.id,
-                        date: txDTO.date,
-                        desc: txDTO.description,
-                        note: txDTO.note,
-                        isSynced: true
-                    )
-                    modelContext.insert(tx)
-                    
-                    // Insert postings
-                    var postings: [SDPosting] = []
-                    for pDTO in txDTO.postings {
-                        // Link tags if present - use fresh tag instances from batch dictionary
-                        var linkedTags: [SDTag]? = nil
-                        if let tagDTOs = pDTO.tags, !tagDTOs.isEmpty {
-                            linkedTags = []
-                            for tagDTO in tagDTOs {
-                                let tagID = tagDTO.id.uuidString
-                                // Use pre-fetched tag from dictionary
-                                if let existingTag = tagsByID[tagID] {
-                                    linkedTags?.append(existingTag)
-                                } else {
-                                    // Fallback: create if not found (shouldn't happen if tags were synced first)
-                                    print("[SyncActor] WARNING: Tag \(tagID) not found in context, creating new one")
-                                    let newTag = SDTag(
-                                        id: tagID,
-                                        name: tagDTO.name,
-                                        desc: tagDTO.description,
-                                        color: tagDTO.color,
-                                        isSynced: true
-                                    )
-                                    modelContext.insert(newTag)
-                                    linkedTags?.append(newTag)
-                                }
-                            }
-                        }
-
-                        let posting = SDPosting(
-                            id: pDTO.id,
-                            accountID: pDTO.account_id,
-                            amount: pDTO.amount,
-                            quantity: pDTO.quantity,
-                            unitCode: pDTO.unit_code,
-                            tags: linkedTags
-                        )
-                        posting.transaction = tx // Set relationship
-                        modelContext.insert(posting)
-                        postings.append(posting)
-                    }
-                    tx.postings = postings
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/net-worth?interval=daily", method: "GET") { (result: Result<NetWorthResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
                 }
-                
-                processed += batch.count
-                try? modelContext.save()
-                print("[SyncActor] Saved batch: \(processed)/\(transactions.count)")
             }
         }
+    }
+    
+    private func cacheNetWorthHistory(_ history: [NetWorthHistoryDTO]) throws {
+        guard let latest = history.last else {
+            print("[SyncActor] No net worth history to cache")
+            return
+        }
+        
+        print("[SyncActor] Caching latest net worth: \(latest.net_worth) from \(latest.date)")
+        
+        // Store the latest value in UserDefaults for dashboard
+        UserDefaults.standard.set(latest.net_worth, forKey: "cached_net_worth")
+        UserDefaults.standard.set(latest.assets, forKey: "cached_assets")
+        UserDefaults.standard.set(latest.liabilities, forKey: "cached_liabilities")
+        UserDefaults.standard.set(latest.date, forKey: "cached_net_worth_date")
     }
 }
 

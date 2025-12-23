@@ -517,23 +517,34 @@ class DashboardCalculator {
             return (assets, liabilities)
         }
         
+        // Fetch all accounts to get categories
+        let accountsDesc = FetchDescriptor<SDAccount>()
+        let accounts = (try? modelContext.fetch(accountsDesc)) ?? []
+        let accountCategoryMap = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0.category) })
+        
         // Calculate from cached transactions
         let allTransactions = getCachedTransactions()
         var assets: Double = 0
         var liabilities: Double = 0
         
+        print("[DashboardCalc] Calculating net worth from \(allTransactions.count) transactions")
+        
         for tx in allTransactions {
             guard let postings = tx.postings else { continue }
             for p in postings {
-                if let cat = p.category {
-                    if cat == "Assets" || cat == "Asset" {
-                        assets += Double(p.amount) ?? 0
-                    } else if cat == "Liabilities" || cat == "Liability" {
-                        liabilities += Double(p.amount) ?? 0
+                // Get category from account map
+                if let category = accountCategoryMap[p.accountID] {
+                    let amount = Double(p.amount) ?? 0
+                    if category == "Asset" {
+                        assets += amount
+                    } else if category == "Liability" {
+                        liabilities += amount
                     }
                 }
             }
         }
+        
+        print("[DashboardCalc] Net Worth: Assets=\(assets), Liabilities=\(liabilities), Total=\(assets + liabilities)")
         
         // Cache the results
         cachedAssets = assets

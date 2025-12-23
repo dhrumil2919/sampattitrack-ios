@@ -54,57 +54,74 @@ struct AccountDetailView: View {
                 .padding(.top, 8)
                 
                 // KPI Cards Grid
-                if isInvestment, let metrics = viewModel.investmentMetrics {
+                if isInvestment, let sdAcc = sdAccount {
                     VStack(spacing: 12) {
-                        // Row 1: Balance and Net Investment
+                        // Get values from metadata
+                        let metaDict = sdAcc.metadataDictionary
+                        let currentBalance = viewModel.balance
+                        let investedAmount = metaDict?["invested_amount"] as? String
+                        let currentValue = metaDict?["current_value"] as? String
+                        let absoluteReturn = metaDict?["absolute_return"] as? String
+                        let xirr = sdAcc.cachedXIRR
+                        
+                        // Calculate return percentage
+                        let invested = investedAmount.flatMap({ Double($0) }) ?? 0
+                        let absReturn = absoluteReturn.flatMap({ Double($0) }) ?? 0
+                        let returnPct = invested > 0 ? (absReturn / invested) * 100 : 0
+                        
+                        // Get deposit/withdrawal from calculated metrics (if available)
+                        let totalInvestment = viewModel.investmentMetrics?.totalDeposits ?? invested
+                        let totalWithdrawal = viewModel.investmentMetrics?.totalWithdrawals ?? 0
+                        
+                        // Row 1: Current Balance and Net Investment
                         HStack(spacing: 12) {
                             KPICard(
                                 title: "Current Balance",
-                                value: CurrencyFormatter.format(String(viewModel.balance), currency: account.currency ?? "INR"),
+                                value: CurrencyFormatter.format(String(currentBalance)),
                                 color: .blue,
                                 subtitle: nil
                             )
                             
                             KPICard(
                                 title: "Net Investment",
-                                value: CurrencyFormatter.format(String(metrics.netInvestment), currency: account.currency ?? "INR"),
+                                value: CurrencyFormatter.format(investedAmount ?? "0"),
                                 color: .cyan,
                                 subtitle: nil
                             )
                         }
                         
-                        // Row 2: Deposits and Withdrawals
+                        // Row 2: Investment and Withdrawal
                         HStack(spacing: 12) {
                             KPICard(
                                 title: "Investment",
-                                value: CurrencyFormatter.format(String(metrics.totalDeposits), currency: account.currency ?? "INR"),
+                                value: CurrencyFormatter.format(String(totalInvestment)),
                                 color: .green,
                                 subtitle: nil
                             )
                             
                             KPICard(
                                 title: "Withdrawal",
-                                value: CurrencyFormatter.format(String(metrics.totalWithdrawals), currency: account.currency ?? "INR"),
+                                value: CurrencyFormatter.format(String(totalWithdrawal)),
                                 color: .orange,
                                 subtitle: nil
                             )
                         }
                         
                         // Row 3: Total Return and XIRR
-                        HStack(spacing:  12) {
+                        HStack(spacing: 12) {
                             KPICard(
                                 title: "Total Return",
-                                value: CurrencyFormatter.format(String(metrics.totalReturn), currency: account.currency ?? "INR"),
-                                color: metrics.totalReturn >= 0 ? .green : .red,
-                                subtitle: String(format: "%.2f%%", metrics.returnPercentage)
+                                value: CurrencyFormatter.format(absoluteReturn ?? "0"),
+                                color: absReturn >= 0 ? .green : .red,
+                                subtitle: String(format: "%.2f%%", returnPct)
                             )
                             
-                            if let xirr = metrics.xirr {
+                            if let xirrValue = xirr {
                                 KPICard(
                                     title: "XIRR",
-                                    value: String(format: "%.2f%%", xirr),
-                                    color: xirr >= 0 ? .green : .red,
-                                    subtitle: nil
+                                    value: String(format: "%.2f%%", xirrValue),
+                                    color: xirrValue >= 0 ? .green : .red,
+                                    subtitle: "Annualized"
                                 )
                             } else {
                                 KPICard(
@@ -121,54 +138,11 @@ struct AccountDetailView: View {
                     // Simple balance card for non-investment accounts
                     KPICard(
                         title: "Current Balance",
-                        value: CurrencyFormatter.format(String(viewModel.balance), currency: account.currency ?? "INR"),
+                        value: CurrencyFormatter.format(String(viewModel.balance)),
                         color: account.category == "Liability" ? .red : .green,
                         subtitle: nil
                     )
                     .padding(.horizontal)
-                }
-                
-                // History Chart
-                if #available(iOS 16.0, *) {
-                    if !viewModel.historyData.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("History")
-                                .font(.headline)
-                                .padding(.horizontal)
-                            
-                            Chart(viewModel.historyData) { point in
-                                // Balance line
-                                LineMark(
-                                    x: .value("Date", point.date),
-                                    y: .value("Balance", point.balance)
-                                )
-                                .foregroundStyle(.blue)
-                                
-                                // Invested amount line for investment accounts
-                                if isInvestment {
-                                    LineMark(
-                                        x: .value("Date", point.date),
-                                        y: .value("Invested", point.investedAmount)
-                                    )
-                                    .foregroundStyle(.cyan)
-                                    .lineStyle(StrokeStyle(dash: [5, 3]))
-                                }
-                                
-                                // Area fill for balance
-                                AreaMark(
-                                    x: .value("Date", point.date),
-                                    y: .value("Balance", point.balance)
-                                )
-                                .foregroundStyle(.blue.opacity(0.1))
-                            }
-                            .frame(height: 200)
-                            .padding()
-                            .background(Color(.systemBackground))
-                            .cornerRadius(12)
-                            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
-                            .padding(.horizontal)
-                        }
-                    }
                 }
                 
                 // Recent Transactions Link

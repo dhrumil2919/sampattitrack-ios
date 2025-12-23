@@ -140,9 +140,9 @@ struct DashboardView: View {
                             }
                         }
                         
-                        // Top Investments
-                        if !viewModel.topInvestments.isEmpty {
-                            TopInvestmentsSection(investments: viewModel.topInvestments)
+                        // Portfolio KPI Grid  
+                        if let portfolio = viewModel.portfolioMetrics {
+                            PortfolioKPIGrid(metrics: portfolio)
                         }
                         
                         // Recent Transactions
@@ -318,35 +318,49 @@ struct SavingsRateCard: View {
     }
 }
 
-// MARK: - Top Investments
-struct TopInvestmentsSection: View {
-    let investments: [InvestmentXIRR]
+// MARK: - Portfolio KPI Grid
+struct PortfolioKPIGrid: View {
+    let metrics: AggregatePortfolioMetrics
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "chart.bar.fill")
                     .foregroundColor(.purple)
-                Text("Top Investments (XIRR)")
+                Text("Portfolio Overview")
                     .font(.headline)
             }
             
-            ForEach(investments) { inv in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(inv.accountName)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Text("Investment")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%.2f%%", inv.xirr))
-                        .font(.headline)
-                        .foregroundColor(inv.xirr >= 0 ? .green : .red)
-                }
-                .padding(.vertical, 4)
+            // Row 1: Invested & Current Value
+            HStack(spacing: 12) {
+                KPICard(
+                    title: "Total Invested",
+                    value: CurrencyFormatter.format(String(metrics.totalInvested)),
+                    color: .blue,
+                    subtitle: nil
+                )
+                KPICard(
+                    title: "Current Value",
+                    value: CurrencyFormatter.format(String(metrics.totalCurrentValue)),
+                    color: .cyan,
+                    subtitle: nil
+                )
+            }
+            
+            // Row 2: Return & XIRR
+            HStack(spacing: 12) {
+                KPICard(
+                    title: "Total Return",
+                    value: CurrencyFormatter.format(String(metrics.totalAbsoluteReturn)),
+                    color: metrics.totalAbsoluteReturn >= 0 ? .green : .red,
+                    subtitle: String(format: "%.2f%%", metrics.returnPercentage)
+                )
+                KPICard(
+                    title: "Weighted XIRR",
+                    value: String(format: "%.2f%%", metrics.weightedXIRR),
+                    color: metrics.weightedXIRR >= 0 ? .green : .red,
+                    subtitle: "Annualized"
+                )
             }
         }
         .padding()

@@ -2,10 +2,16 @@ import Foundation
 import Combine
 import SwiftData
 
-struct InvestmentXIRR: Identifiable {
-    let id: String
-    let accountName: String
-    let xirr: Double
+struct AggregatePortfolioMetrics {
+    var totalInvested: Double = 0
+    var totalCurrentValue: Double = 0
+    var totalAbsoluteReturn: Double = 0
+    var weightedXIRR: Double = 0
+    
+    var returnPercentage: Double {
+        guard totalInvested > 0 else { return 0 }
+        return (totalAbsoluteReturn / totalInvested) * 100
+    }
 }
 
 /// DashboardViewModel - OFFLINE-FIRST
@@ -13,7 +19,7 @@ struct InvestmentXIRR: Identifiable {
 class DashboardViewModel: ObservableObject {
     @Published var summary: ClientDashboardData?
     @Published var recentTransactions: [Transaction] = []
-    @Published var topInvestments: [InvestmentXIRR] = []
+    @Published var portfolioMetrics: AggregatePortfolioMetrics?
     @Published var netWorthHistory: [NetWorthDataPoint] = []
     @Published var monthlyTagSpending: [(month: String, tags: [(tag: String, amount: Double)])] = []
     @Published var topTags: [TopTag] = []
@@ -56,105 +62,81 @@ class DashboardViewModel: ObservableObject {
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
             let recent = calculator.fetchRecentTransactions(limit: 5)
 
-            // Calculate investment XIRR using client-side calculator
+            // Calculate aggregate portfolio metrics from all investment accounts
             let accountsDescriptor = FetchDescriptor<SDAccount>()
             let allAccounts = (try? context.fetch(accountsDescriptor)) ?? []
-            let transactions = (try? context.fetch(FetchDescriptor<SDTransaction>())) ?? []
             
-            let investments = allAccounts
-                .filter { $0.type == "Investment" }
-                .compactMap { account -> InvestmentXIRR? in
-                    // Calculate XIRR using XIRRCalculator
-                    let xirr = self.calculateInvestmentXIRR(
-                        account: account,
-                        transactions: transactions,
-                        context: context
-                    )
-                    
-                    // Only include if XIRR could be calculated
-                    if let xirrValue = xirr {
-                        return InvestmentXIRR(
-                            id: account.id,
-                            accountName: account.name,
-                            xirr: xirrValue
-                        )
-                    }
-                    return nil
+            var aggregateMetrics = AggregatePortfolioMetrics()
+            var totalWeightedXIRR: Double = 0
+            var totalWeight: Double = 0
+            
+            for account in allAccounts.filter({ $0.type == "Investment" }) {
+                // Extract metrics from metadata
+                guard let metaDict = account.metadataDictionary,
+                      let investedStr = metaDict["invested_amount"] as? String,
+                      let currentStr = metaDict["current_value"] as? String,
+                      let returnStr = metaDict["absolute_return"] as? String,
+                      let invested = Double(investedStr),
+                      let current = Double(currentStr),
+                      let absReturn = Double(returnStr),
+                      let xirr = account.cachedXIRR else {
+                    print("[Dashboard] Missing data for account: \(account.name)")
+                    continue
                 }
-                .sorted { abs($0.xirr) > abs($1.xirr) }
-                .prefix(5)
+                
+                aggregateMetrics.totalInvested += invested
+                aggregateMetrics.totalCurrentValue += current
+                aggregateMetrics.totalAbsoluteReturn += absReturn
+                
+                // Weight XIRR by invested amount
+                totalWeightedXIRR += xirr * invested
+                totalWeight += invested
+            }
+            
+            // Calculate weighted average XIRR
+            if totalWeight > 0 {
+                aggregateMetrics.weightedXIRR = totalWeightedXIRR / totalWeight
+            }
 
             await MainActor.run {
-                self.summary = summaryData
+                // Use API-cached net worth if available (matches web frontend approach)
+                let cachedNetWorth = UserDefaults.standard.string(forKey: "cached_net_worth")
+                
+                if let apiNetWorth = cachedNetWorth {
+                    // Override with API value (web uses net worth history API)
+                    self.summary = ClientDashboardData(
+                        netWorth: apiNetWorth,
+                        lastMonthIncome: summaryData.lastMonthIncome,
+                        lastMonthExpenses: summaryData.lastMonthExpenses,
+                        yearlyIncome: summaryData.yearlyIncome,
+                        yearlyExpenses: summaryData.yearlyExpenses,
+                        totalAssets: summaryData.totalAssets,
+                        totalLiabilities: summaryData.totalLiabilities,
+                        savingsRate: summaryData.savingsRate,
+                        yearlySavings: summaryData.yearlySavings,
+                        averageGrowthRate: summaryData.averageGrowthRate,
+                        netWorthGrowth: summaryData.netWorthGrowth,
+                        expenseGrowth: summaryData.expenseGrowth,
+                        savingsRateChange: summaryData.savingsRateChange,
+                        cashFlowRatio: summaryData.cashFlowRatio,
+                        monthlyBurnRate: summaryData.monthlyBurnRate,
+                        runwayDays: summaryData.runwayDays,
+                        debtToAssetRatio: summaryData.debtToAssetRatio
+                    )
+                    print("[Dashboard] Using API-cached net worth: \(apiNetWorth)")
+                } else {
+                    // Fallback to calculated value if API hasn't synced yet
+                    self.summary = summaryData
+                    print("[Dashboard] Using locally calculated net worth: \(summaryData.netWorth)")
+                }
+                
                 self.netWorthHistory = history
-                self.topTags = tags
+                self.topTags = Array(tags.prefix(5))
                 self.monthlyTagSpending = spending
                 self.recentTransactions = recent
-                
-                // Set investment accounts with XIRR
-                self.topInvestments = Array(investments)
+                self.portfolioMetrics = aggregateMetrics
+                self.isLoading = false
             }
         }
-    }
-    
-    /// Calculate XIRR for an investment account using local transaction and price data
-    private func calculateInvestmentXIRR(account: SDAccount, transactions: [SDTransaction], context: ModelContext) -> Double? {
-        var dates: [Date] = []
-        var amounts: [Double] = []
-        
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        
-        // Collect cash flows from transactions
-        for tx in transactions {
-            for posting in tx.postings ?? [] {
-                if posting.accountID == account.id {
-                    if let date = formatter.date(from: tx.date),
-                       let amount = Double(posting.amount) {
-                        dates.append(date)
-                        amounts.append(amount)
-                    }
-                }
-            }
-        }
-        
-        guard !dates.isEmpty else { return nil }
-        
-        // Calculate current market value using latest prices
-        var currentValue: Double = 0
-        
-        // Group postings by unit to calculate quantity held
-        var unitQuantities: [String: Double] = [:]
-        for tx in transactions {
-            for posting in tx.postings ?? [] {
-                if posting.accountID == account.id,
-                   let unitCode = posting.unitCode,
-                   let quantity = Double(posting.quantity ?? posting.amount) {
-                    unitQuantities[unitCode, default: 0] += quantity
-                }
-            }
-        }
-        
-        // Get latest prices for each unit
-        for (unitCode, quantity) in unitQuantities {
-            var priceFetchDesc = FetchDescriptor<SDPrice>(
-                predicate: #Predicate { $0.unitCode == unitCode },
-                sortBy: [SortDescriptor(\.date, order: .reverse)]
-            )
-            priceFetchDesc.fetchLimit = 1
-            
-            if let latestPrice = try? context.fetch(priceFetchDesc).first,
-               let priceValue = Double(latestPrice.price) {
-                currentValue += quantity * priceValue
-            }
-        }
-        
-        // Add current value as final "exit" cash flow
-        if currentValue > 0 {
-            dates.append(Date())
-            amounts.append(currentValue)  // Positive = current market value
-        }
-        
-        return XIRRCalculator.calculateXIRR(dates: dates, amounts: amounts)
     }
 }

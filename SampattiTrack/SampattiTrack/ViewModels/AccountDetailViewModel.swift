@@ -121,13 +121,24 @@ class AccountDetailViewModel: ObservableObject {
     
     /// Load cached XIRR from SDAccount if available
     func loadCachedXIRR(account: SDAccount) {
+        print("[AccountDetailVM] Loading XIRR for account: \(account.name)")
+        print("[AccountDetailVM] - cachedXIRR: \(account.cachedXIRR ?? -999)")
+        print("[AccountDetailVM] - xirrCachedAt: \(account.xirrCachedAt?.description ?? "nil")")
+        print("[AccountDetailVM] - metadata: \(account.metadataDictionary?.keys.joined(separator: ", ") ?? "none")")
+        
         if let xirr = account.cachedXIRR {
+            print("[AccountDetailVM] Setting XIRR to: \(xirr)")
             Task { @MainActor in
                 if var metrics = self.investmentMetrics {
                     metrics.xirr = xirr
                     self.investmentMetrics = metrics
+                    print("[AccountDetailVM] XIRR set successfully in metrics")
+                } else {
+                    print("[AccountDetailVM] WARNING: investmentMetrics is nil, cannot set XIRR")
                 }
             }
+        } else {
+            print("[AccountDetailVM] WARNING: No cached XIRR found for account")
         }
     }
 }
