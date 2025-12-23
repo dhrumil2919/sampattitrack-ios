@@ -23,6 +23,14 @@ struct ContentView: View {
                                 Label("Accounts", systemImage: "list.bullet")
                             }
 
+                        NavigationStack {
+                             LiabilitiesView()
+                        }
+                        .tabItem {
+                            Label("Liabilities", systemImage: "creditcard.fill")
+                        }
+
+
 
                         NavigationStack {
                             TransactionListView()

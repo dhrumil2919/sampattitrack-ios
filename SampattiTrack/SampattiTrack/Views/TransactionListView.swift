@@ -73,6 +73,7 @@ struct TransactionListView: View {
                     .onDelete(perform: deleteTransactions)
                 }
                 .listStyle(PlainListStyle())
+            }
         }
         .navigationTitle("Transactions")
         .navigationDestination(for: SDTransaction.self) { transaction in

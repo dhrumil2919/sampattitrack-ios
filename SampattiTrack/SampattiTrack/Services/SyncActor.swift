@@ -17,6 +17,7 @@ struct PostingDTO: Codable, Sendable {
     let amount: String
     let quantity: String
     let unit_code: String?
+    let tags: [TagDTO]?
 }
 
 struct TagDTO: Codable, Sendable {
@@ -34,6 +35,43 @@ struct AccountDTO: Codable, Sendable {
     let currency: String?  // Optional - backend excludes this from JSON
     let icon: String?
     let parent_id: String?
+    let metadata: [String: GenericJSON]? // Capture unique metadata
+}
+
+// MARK: - Helper for AnyCodable
+enum GenericJSON: Codable, Sendable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let x = try? container.decode(String.self) { self = .string(x); return }
+        if let x = try? container.decode(Double.self) { self = .number(x); return }
+        if let x = try? container.decode(Bool.self) { self = .bool(x); return }
+        if container.decodeNil() { self = .null; return }
+        throw DecodingError.typeMismatch(GenericJSON.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for GenericJSON"))
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let x): try container.encode(x)
+        case .number(let x): try container.encode(x)
+        case .bool(let x): try container.encode(x)
+        case .null: try container.encodeNil()
+        }
+    }
+    
+    var anyValue: Any? {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return n
+        case .bool(let b): return b
+        case .null: return nil
+        }
+    }
 }
 
 struct UnitDTO: Codable, Sendable {
@@ -171,7 +209,8 @@ actor SyncActor {
                 account_id: p.accountID,
                 amount: p.amount,
                 quantity: p.quantity ?? p.amount,
-                unit_code: p.unitCode
+                unit_code: p.unitCode,
+                tags: nil  // Tags are not sent when creating transactions from offline queue
             )
         }
         
@@ -350,7 +389,10 @@ actor SyncActor {
     }
     
     private func insertTags(_ tags: [TagDTO]) throws {
-        print("[SyncActor] Inserting \(tags.count) tags...")
+        print("[SyncActor] DEBUG: Received \(tags.count) tags from API")
+        if tags.isEmpty {
+            print("[SyncActor] WARNING: API returned 0 tags. Check if backend has tags.")
+        }
         for tag in tags {
             let sdTag = SDTag(
                 id: tag.id.uuidString,
@@ -362,11 +404,22 @@ actor SyncActor {
             modelContext.insert(sdTag)
         }
         try modelContext.save()
+        print("[SyncActor] DEBUG: Successfully saved \(tags.count) tags to SwiftData")
     }
     
     private func insertAccounts(_ accounts: [AccountDTO]) throws {
         print("[SyncActor] Inserting \(accounts.count) accounts...")
         for account in accounts {
+            // Convert GenericJSON metadata to Data
+            var metadataData: Data? = nil
+            if let meta = account.metadata {
+                let dict = meta.mapValues { $0.anyValue }
+                let validDict = dict.compactMapValues { $0 }
+                if !validDict.isEmpty {
+                    metadataData = try? JSONSerialization.data(withJSONObject: validDict, options: [])
+                }
+            }
+
             let sdAccount = SDAccount(
                 id: account.id,
                 name: account.name,
@@ -374,7 +427,8 @@ actor SyncActor {
                 type: account.type,
                 currency: account.currency ?? "INR",  // Default to INR if not provided
                 icon: account.icon,
-                parentID: account.parent_id
+                parentID: account.parent_id,
+                metadata: metadataData
             )
             modelContext.insert(sdAccount)
         }
@@ -418,14 +472,38 @@ actor SyncActor {
                     // Insert postings
                     var postings: [SDPosting] = []
                     for pDTO in txDTO.postings {
+                        // Link tags if present
+                        var linkedTags: [SDTag]? = nil
+                        if let tagDTOs = pDTO.tags, !tagDTOs.isEmpty {
+                            linkedTags = []
+                            for tagDTO in tagDTOs {
+                                let tagID = tagDTO.id.uuidString
+                                let fetchDesc = FetchDescriptor<SDTag>(predicate: #Predicate { $0.id == tagID })
+                                if let existing = try? modelContext.fetch(fetchDesc).first {
+                                     linkedTags?.append(existing)
+                                } else {
+                                     let newTag = SDTag(
+                                        id: tagID,
+                                        name: tagDTO.name,
+                                        desc: tagDTO.description,
+                                        color: tagDTO.color,
+                                        isSynced: true
+                                     )
+                                     modelContext.insert(newTag)
+                                     linkedTags?.append(newTag)
+                                }
+                            }
+                        }
+
                         let posting = SDPosting(
                             id: pDTO.id,
                             accountID: pDTO.account_id,
                             amount: pDTO.amount,
                             quantity: pDTO.quantity,
                             unitCode: pDTO.unit_code,
-                            tags: nil
+                            tags: linkedTags
                         )
+                        posting.transaction = tx // Set relationship
                         modelContext.insert(posting)
                         postings.append(posting)
                     }
