@@ -1,29 +1,18 @@
 import Foundation
+import SwiftData
 import Combine
 
+/// AccountListViewModel - OFFLINE-FIRST
+/// Uses local SwiftData. This ViewModel is now DEPRECATED - AccountListView uses @Query directly.
+/// Keeping for backwards compatibility but all methods are no-ops.
 class AccountListViewModel: ObservableObject {
     @Published var accounts: [Account] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    /// DEPRECATED: AccountListView now uses @Query on SDAccount
     func fetchAccounts() {
-        isLoading = true
-        errorMessage = nil
-        
-        APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.accounts = response.data
-                    } else {
-                        self.errorMessage = "Failed to load accounts"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error)"
-                }
-            }
-        }
+        // No-op - data comes from SwiftData @Query
+        isLoading = false
     }
 }

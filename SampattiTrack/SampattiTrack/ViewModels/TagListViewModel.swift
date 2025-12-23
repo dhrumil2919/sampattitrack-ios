@@ -1,85 +1,91 @@
 import Foundation
+import SwiftData
 import Combine
 
+/// TagListViewModel - OFFLINE-FIRST
+/// Uses local SwiftData for tag management. No API calls.
 class TagListViewModel: ObservableObject {
-    @Published var tags: [Tag] = []
+    @Published var tags: [SDTag] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    private var modelContext: ModelContext?
+    
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+        fetchTags()
+    }
+    
+    /// Fetch tags from LOCAL SwiftData - no API call
     func fetchTags() {
+        guard let context = modelContext else { return }
+        
         isLoading = true
-        errorMessage = nil
-        
-        APIClient.shared.listTags { [weak self] result in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self?.tags = response.data
-                    }
-                case .failure(let error):
-                    self?.errorMessage = "Failed to load tags: \(error)"
-                }
-            }
+        do {
+            let descriptor = FetchDescriptor<SDTag>(sortBy: [SortDescriptor(\.name)])
+            tags = try context.fetch(descriptor)
+            isLoading = false
+        } catch {
+            errorMessage = "Failed to load tags: \(error)"
+            isLoading = false
         }
     }
     
-    func createTag(name: String, description: String?, color: String?, completion: @escaping (Bool) -> Void) {
-        let request = CreateTagRequest(name: name, description: description, color: color)
+    /// Create tag locally with isSynced=false
+    func createTag(name: String, description: String?, color: String?) {
+        guard let context = modelContext else { return }
         
-        APIClient.shared.createTag(request) { [weak self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self?.fetchTags()
-                        completion(true)
-                    } else {
-                        completion(false)
-                    }
-                case .failure:
-                    completion(false)
-                }
-            }
+        let newTag = SDTag(
+            id: UUID().uuidString,
+            name: name,
+            desc: description,
+            color: color,
+            isSynced: false
+        )
+        context.insert(newTag)
+        
+        do {
+            try context.save()
+            fetchTags()
+        } catch {
+            errorMessage = "Failed to create tag: \(error)"
         }
     }
     
-    func updateTag(id: String, name: String, description: String?, color: String?, completion: @escaping (Bool) -> Void) {
-        let request = CreateTagRequest(name: name, description: description, color: color)
+    /// Update tag locally with isSynced=false
+    func updateTag(id: String, name: String, description: String?, color: String?) {
+        guard let context = modelContext else { return }
         
-        APIClient.shared.updateTag(id: id, request) { [weak self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self?.fetchTags()
-                        completion(true)
-                    } else {
-                        completion(false)
-                    }
-                case .failure:
-                    completion(false)
-                }
+        let descriptor = FetchDescriptor<SDTag>(predicate: #Predicate { $0.id == id })
+        
+        do {
+            if let existing = try context.fetch(descriptor).first {
+                existing.name = name
+                existing.desc = description
+                existing.color = color
+                existing.isSynced = false
+                try context.save()
+                fetchTags()
             }
+        } catch {
+            errorMessage = "Failed to update tag: \(error)"
         }
     }
     
-    func deleteTag(id: String, completion: @escaping (Bool) -> Void) {
-        APIClient.shared.deleteTag(id: id) { [weak self] result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self?.fetchTags()
-                        completion(true)
-                    } else {
-                        completion(false)
-                    }
-                case .failure:
-                    completion(false)
-                }
+    /// Delete tag locally
+    func deleteTag(id: String) {
+        guard let context = modelContext else { return }
+        
+        let descriptor = FetchDescriptor<SDTag>(predicate: #Predicate { $0.id == id })
+        
+        do {
+            if let existing = try context.fetch(descriptor).first {
+                context.delete(existing)
+                try context.save()
+                fetchTags()
             }
+        } catch {
+            errorMessage = "Failed to delete tag: \(error)"
         }
     }
 }

@@ -5,7 +5,10 @@ struct TransactionListView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var syncManager: SyncManager
     
-    @Query(sort: \SDTransaction.date, order: .reverse) private var transactions: [SDTransaction]
+    @Query(
+        sort: \SDTransaction.date,
+        order: .reverse
+    ) private var transactions: [SDTransaction]
     
     @State private var searchText = ""
     @State private var isRefreshing = false
@@ -70,15 +73,15 @@ struct TransactionListView: View {
                     .onDelete(perform: deleteTransactions)
                 }
                 .listStyle(PlainListStyle())
-                .navigationDestination(for: SDTransaction.self) { transaction in
-                    EditTransactionView(transaction: transaction.toTransaction)
-                }
             }
         }
         .navigationTitle("Transactions")
+        .navigationDestination(for: SDTransaction.self) { transaction in
+            EditTransactionView(transaction: transaction.toTransaction)
+        }
         .searchable(text: $searchText, prompt: "Search transactions...")
         .refreshable {
-            await syncManager.pullTransactions()
+            await syncManager.syncAll()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -158,6 +161,11 @@ struct TransactionListView: View {
                 return "arrow.left.arrow.right.circle.fill"
             }
         }
+        // Get all unique account IDs from postings
+        var accountIds: String {
+            let ids = transaction.postings?.compactMap { $0.accountID } ?? []
+            return ids.joined(separator: " → ")
+        }
         
         var body: some View {
             HStack(spacing: 12) {
@@ -167,21 +175,28 @@ struct TransactionListView: View {
                     .foregroundColor(amountColor)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(transaction.desc)
+                    // Description or fallback to accounts
+                    Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
                         .font(.headline)
+                        .lineLimit(1)
+                    
+                    // Show accounts on second line
+                    Text(accountIds)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
                     
                     HStack(spacing: 4) {
                         Text(transaction.date)
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                         
                         if let note = transaction.note, !note.isEmpty {
                             Text("•")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                             Text(note)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }

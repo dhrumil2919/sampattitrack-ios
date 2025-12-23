@@ -6,7 +6,6 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
 
     // Navigation States
-    @State private var showingVizView = false
     @State private var showingTagsView = false
     
     var body: some View {
@@ -25,7 +24,7 @@ struct DashboardView: View {
                         // Net Worth Hero Card
                         NetWorthCard(netWorth: summary.netWorth, growth: summary.netWorthGrowth)
                             .onTapGesture {
-                                showingVizView = true
+                                // Visualization removed
                             }
                         
                         // Quick Stats Grid
@@ -81,14 +80,17 @@ struct DashboardView: View {
                             debtToAssetRatio: summary.debtToAssetRatio
                         )
                         
-                        // Net Worth Trend
-                        if !viewModel.netWorthHistory.isEmpty {
-                            NetWorthChart(data: viewModel.netWorthHistory)
-                                .onTapGesture {
-                                    showingVizView = true
-                                }
-                        }
+                        // Net Worth Trend (Chart component removed)
+                        // if !viewModel.netWorthHistory.isEmpty {
+                        //     NetWorthChart(data: viewModel.netWorthHistory)
+                        //         .onTapGesture {
+                        //             // Visualization removed
+                        //         }
+                        // }
                         
+                        // TEMPORARILY DISABLED: New trend charts causing memory spike
+                        // TODO: Investigate SwiftUI Charts memory usage with tuple data
+                        /*
                         // NEW: MoM Expense Trend Chart with Average Line
                         if !viewModel.monthlyExpenses.isEmpty {
                             if #available(iOS 16.0, *) {
@@ -119,6 +121,7 @@ struct DashboardView: View {
                                 SavingsTrendChart(monthlyData: viewModel.monthlySavings)
                             }
                         }
+                        */
                         
                         // Expense Pie Chart
                         if !viewModel.topTags.isEmpty {
@@ -145,16 +148,11 @@ struct DashboardView: View {
                         // Recent Transactions
                         if !viewModel.recentTransactions.isEmpty {
                             RecentTransactionsSection(
-                                transactions: viewModel.recentTransactions,
-                                accounts: viewModel.accounts
+                                transactions: viewModel.recentTransactions
                             )
                         }
                         
                         // Hidden Links
-                        NavigationLink(isActive: $showingVizView) {
-                             VizView()
-                        } label: { EmptyView() }
-
                         NavigationLink(isActive: $showingTagsView) {
                             TagListView()
                         } label: { EmptyView() }
@@ -336,10 +334,10 @@ struct TopInvestmentsSection: View {
             ForEach(investments) { inv in
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(inv.account.name)
+                        Text(inv.accountName)
                             .font(.subheadline)
                             .fontWeight(.medium)
-                        Text(inv.account.type)
+                        Text("Investment")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -361,7 +359,6 @@ struct TopInvestmentsSection: View {
 // MARK: - Recent Transactions
 struct RecentTransactionsSection: View {
     let transactions: [Transaction]
-    let accounts: [Account]
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -374,13 +371,13 @@ struct RecentTransactionsSection: View {
             
             ForEach(transactions) { tx in
                 HStack {
-                    // Direction icon
-                    let isIncome = tx.postings.first(where: { (Double($0.amount) ?? 0) < 0 })
-                        .flatMap { p in accounts.first(where: { $0.id == p.accountID }) }
-                        .map { $0.category == "Income" } ?? false
+                    // Use Transaction's determineType for color  
+                    let txType = tx.determineType()
                     
-                    Image(systemName: isIncome ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                        .foregroundColor(isIncome ? .green : .red)
+                    Image(systemName: txType == .income ? "arrow.down.circle.fill" : 
+                            (txType == .expense ? "arrow.up.circle.fill" : "arrow.left.arrow.right.circle.fill"))
+                        .foregroundColor(txType == .income ? .green : 
+                            (txType == .expense ? .red : .blue))
                     
                     VStack(alignment: .leading) {
                         Text(tx.description)

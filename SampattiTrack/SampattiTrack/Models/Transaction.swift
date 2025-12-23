@@ -177,3 +177,9 @@ struct SingleTransactionResponse: Codable {
     let success: Bool
     let data: Transaction
 }
+
+// Generic response for creating/updating transactions
+struct TransactionResponse: Codable {
+    let success: Bool
+    let data: Transaction?
+}

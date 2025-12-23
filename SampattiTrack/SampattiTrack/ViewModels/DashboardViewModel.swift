@@ -2,24 +2,16 @@ import Foundation
 import Combine
 import SwiftData
 
-struct XIRRResponse: Codable {
-    let success: Bool
-    let data: XIRRData
-}
-
-struct XIRRData: Codable {
-    let xirr: Double
-}
-
 struct InvestmentXIRR: Identifiable {
     let id: String
-    let account: Account
+    let accountName: String
     let xirr: Double
 }
 
+/// DashboardViewModel - OFFLINE-FIRST
+/// All data is loaded from local SwiftData. No API calls.
 class DashboardViewModel: ObservableObject {
     @Published var summary: ClientDashboardData?
-    @Published var accounts: [Account] = []
     @Published var recentTransactions: [Transaction] = []
     @Published var topInvestments: [InvestmentXIRR] = []
     @Published var netWorthHistory: [NetWorthDataPoint] = []
@@ -28,65 +20,32 @@ class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    // New: Monthly trend data for charts
-    @Published var monthlyExpenses: [(month: String, amount: Double)] = []
-    @Published var monthlyIncome: [(month: String, amount: Double)] = []
-    @Published var monthlySavings: [(month: String, savings: Double)] = []
-    
     @Published var selectedRange: DateRange = .lastMonth() {
         didSet {
             calculateClientSideData()
         }
     }
 
-    // Use ModelContainer to create background context safely
     private var container: ModelContainer?
 
     func setContainer(_ container: ModelContainer) {
         self.container = container
-        // Initial calculation
         calculateClientSideData()
     }
 
+    /// Called to refresh dashboard - uses only local data
     func fetchAll() {
         isLoading = true
         errorMessage = nil
-        
         calculateClientSideData()
-        
-        // Fetch accounts for XIRR
-        APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.accounts = response.data
-                        self.fetchXIRRForInvestments()
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        // Fetch recent transactions (API)
-        // We do this via API for now, but also have local fallback in calculateClientSideData
-        // Actually, let's move recent transactions to local calc to ensure offline support.
-        // API call removed.
-        
-        self.isLoading = false
+        isLoading = false
     }
 
     private func calculateClientSideData() {
         guard let container = container else { return }
         
-        // Use YTD range for trend charts (more data points)
-        let trendRange = DateRange.ytd()
-        
         Task.detached(priority: .userInitiated) {
-            // Create a new context on this background thread
             let context = ModelContext(container)
-            // Disable autosave for read-only operations to improve performance
             context.autosaveEnabled = false
 
             let calculator = DashboardCalculator(modelContext: context)
@@ -96,11 +55,46 @@ class DashboardViewModel: ObservableObject {
             let tags = calculator.calculateTagBreakdown(range: self.selectedRange)
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
             let recent = calculator.fetchRecentTransactions(limit: 5)
+
+            // Fetch investment accounts with cached XIRR
+            let accountsDescriptor = FetchDescriptor<SDAccount>()
+            let allAccounts = (try? context.fetch(accountsDescriptor)) ?? []
             
-            // New: Monthly trends for charts (using YTD for more data points)
-            let expenses = calculator.calculateMonthlyExpenses(range: trendRange)
-            let income = calculator.calculateMonthlyIncome(range: trendRange)
-            let savings = calculator.calculateMonthlySavings(range: trendRange)
+            let investments = allAccounts
+                .filter { $0.type == "Investment" }
+                .compactMap { account -> InvestmentXIRR? in
+                    // Calculate balance from transactions
+                    let transactionsDesc = FetchDescriptor<SDTransaction>()
+                    let transactions = (try? context.fetch(transactionsDesc)) ?? []
+                    
+                    var balance: Double = 0
+                    for tx in transactions {
+                        for posting in tx.postings ?? [] {
+                            if posting.accountID == account.id {
+                                balance += Double(posting.amount) ?? 0
+                            }
+                        }
+                    }
+                    
+                    // Only include if has XIRR or substantial balance
+                    if let xirr = account.cachedXIRR {
+                        return InvestmentXIRR(
+                            id: account.id,
+                            accountName: account.name,
+                            xirr: xirr
+                        )
+                    } else if balance > 100 {
+                        // Include even without XIRR if balance is significant
+                        return InvestmentXIRR(
+                            id: account.id,
+                            accountName: account.name,
+                            xirr: 0 // Placeholder
+                        )
+                    }
+                    return nil
+                }
+                .sorted { ($0.xirr != 0 ? abs($0.xirr) : -1) > ($1.xirr != 0 ? abs($1.xirr) : -1) }
+                .prefix(5)
 
             await MainActor.run {
                 self.summary = summaryData
@@ -109,42 +103,9 @@ class DashboardViewModel: ObservableObject {
                 self.monthlyTagSpending = spending
                 self.recentTransactions = recent
                 
-                // New: Monthly trends
-                self.monthlyExpenses = expenses
-                self.monthlyIncome = income
-                self.monthlySavings = savings
+                // Set investment accounts with XIRR
+                self.topInvestments = Array(investments)
             }
-        }
-    }
-    
-    private func fetchXIRRForInvestments() {
-        let investmentTypes = ["Stock", "MutualFund", "Metal", "NPS"]
-        let investments = accounts.filter { investmentTypes.contains($0.type) }
-        
-        guard !investments.isEmpty else { return }
-        
-        var results: [InvestmentXIRR] = []
-        let group = DispatchGroup()
-        
-        for account in investments {
-            group.enter()
-            APIClient.shared.request("/analysis/xirr?account_id=\(account.id)") { (result: Result<XIRRResponse, APIClient.APIError>) in
-                defer { group.leave() }
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        DispatchQueue.main.async {
-                            results.append(InvestmentXIRR(id: account.id, account: account, xirr: response.data.xirr))
-                        }
-                    }
-                case .failure:
-                    break
-                }
-            }
-        }
-        
-        group.notify(queue: .main) {
-            self.topInvestments = results.sorted { $0.xirr > $1.xirr }.prefix(3).map { $0 }
         }
     }
 }

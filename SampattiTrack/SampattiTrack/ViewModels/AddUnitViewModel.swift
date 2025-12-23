@@ -1,7 +1,8 @@
 import Foundation
+import SwiftData
 import Combine
 
-// Symbol search result model - matches backend SearchResult
+// Symbol search result model - kept for future use when online
 struct SymbolSearchResult: Codable, Identifiable {
     let symbol: String
     let name: String
@@ -11,17 +12,14 @@ struct SymbolSearchResult: Codable, Identifiable {
     var id: String { symbol }
 }
 
-struct SymbolSearchResponse: Codable {
-    let success: Bool
-    let data: [SymbolSearchResult]
-}
-
+/// AddUnitViewModel - OFFLINE-FIRST
+/// Saves units to local SwiftData with isSynced=false. No API calls.
+/// Symbol search is disabled in offline mode.
 class AddUnitViewModel: ObservableObject {
     @Published var code: String = ""
     @Published var name: String = ""
     @Published var type: String = "MutualFund"
     @Published var symbol: String = ""
-    @Published var provider: String = "mfapi"
     @Published var currency: String = "INR"
     
     @Published var isLoading = false
@@ -30,102 +28,72 @@ class AddUnitViewModel: ObservableObject {
     
     @Published var searchResults: [SymbolSearchResult] = []
     @Published var isSearching = false
-    private var searchCancellable: AnyCancellable?
+    
+    private var modelContext: ModelContext?
     
     let types = ["Currency", "Stock", "MutualFund", "Metal", "NPS", "Custom"]
-    let providers = ["mfapi", "yahoo", "nps", "metal", "custom"]
     
-    init() {
-        // Setup debounced search
-        searchCancellable = $name
-            .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
-            .removeDuplicates()
-            .sink { [weak self] query in
-                self?.searchSymbols(query: query)
-            }
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
     }
     
+    /// Symbol search disabled in offline mode
     func searchSymbols(query: String) {
-        guard !query.isEmpty, query.count >= 3 else {
-            searchResults = []
-            return
-        }
-        
-        // Only search for types that support symbol lookup
-        guard ["Stock", "MutualFund", "NPS"].contains(type) else {
-            searchResults = []
-            return
-        }
-        
-        isSearching = true
-        
-        let endpoint = "/prices/search?query=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)&type=\(type)"
-        
-        APIClient.shared.request(endpoint, method: "GET") { (result: Result<SymbolSearchResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isSearching = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.searchResults = response.data
-                    }
-                case .failure:
-                    self.searchResults = []
-                }
-            }
-        }
+        // Symbol search requires API - disabled in offline-first mode
+        // Users must manually enter code and name
+        searchResults = []
     }
     
     func selectSymbol(_ result: SymbolSearchResult) {
-        // Generate code from name (uppercase, remove spaces)
         self.code = result.name.uppercased().replacingOccurrences(of: " ", with: "_")
         self.name = result.name
         self.symbol = result.symbol
         self.searchResults = []
     }
     
+    /// Create unit in LOCAL SwiftData - no API call
     func createUnit() {
         guard !code.isEmpty, !name.isEmpty else {
             errorMessage = "Code and Name are required"
             return
         }
         
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
+            return
+        }
+        
         isLoading = true
         errorMessage = nil
         
-        struct CreateUnitRequest: Encodable {
-            let code: String
-            let name: String
-            let type: String
-            let symbol: String?
-            let provider: String?
-            let currency: String
-        }
+        // Check if unit already exists
+        let unitCode = code
+        let descriptor = FetchDescriptor<SDUnit>(predicate: #Predicate { $0.code == unitCode })
         
-        let req = CreateUnitRequest(
-            code: code,
-            name: name,
-            type: type,
-            symbol: symbol.isEmpty ? nil : symbol,
-            provider: provider.isEmpty ? nil : provider,
-            currency: currency.isEmpty ? "INR" : currency
-        )
-        
-        APIClient.shared.request("/units", method: "POST", body: req) { (result: Result<UnitResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.successMessage = "Unit created successfully!"
-                        self.resetForm()
-                    } else {
-                        self.errorMessage = "Failed to create unit"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error.localizedDescription)"
-                }
+        do {
+            let existing = try context.fetch(descriptor)
+            if !existing.isEmpty {
+                errorMessage = "Unit with code '\(code)' already exists"
+                isLoading = false
+                return
             }
+            
+            let newUnit = SDUnit(
+                code: code,
+                name: name,
+                symbol: symbol.isEmpty ? nil : symbol,
+                type: type,
+                isSynced: false  // Will be synced later
+            )
+            context.insert(newUnit)
+            try context.save()
+            
+            isLoading = false
+            successMessage = "Unit created successfully!"
+            resetForm()
+        } catch {
+            errorMessage = "Failed to create unit: \(error)"
+            isLoading = false
         }
     }
     
@@ -134,13 +102,6 @@ class AddUnitViewModel: ObservableObject {
         name = ""
         type = "MutualFund"
         symbol = ""
-        provider = "mfapi"
         currency = "INR"
     }
-}
-
-// Wrapper for response
-struct UnitResponse: Decodable {
-    let success: Bool
-    let data: FinancialUnit
 }

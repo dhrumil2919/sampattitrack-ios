@@ -1,9 +1,12 @@
 import SwiftUI
+import SwiftData
 import Combine
 
 let CATEGORIES = ["Asset", "Liability", "Income", "Expense", "Equity"]
 let TYPES = ["Cash", "Stock", "MutualFund", "Metal", "NPS", "CreditCard", "Loan", "Custom"]
 
+/// EditAccountViewModel - OFFLINE-FIRST
+/// Uses local SwiftData. Saves locally with isSynced=false.
 class EditAccountViewModel: ObservableObject {
     @Published var name: String
     @Published var type: String
@@ -12,13 +15,14 @@ class EditAccountViewModel: ObservableObject {
     @Published var parentID: String?
     @Published var relatedAccountID: String?
     
-    @Published var accounts: [Account] = []
+    @Published var accounts: [SDAccount] = []
     @Published var isLoading = false
     @Published var isSaving = false
     @Published var errorMessage: String?
     @Published var successMessage: String?
     
     let accountID: String
+    private var modelContext: ModelContext?
     
     init(account: Account) {
         self.accountID = account.id
@@ -29,69 +33,67 @@ class EditAccountViewModel: ObservableObject {
         self.parentID = account.parentID
     }
     
+    func setModelContext(_ context: ModelContext) {
+        self.modelContext = context
+        fetchAccounts()
+    }
+    
+    /// Fetch accounts from LOCAL SwiftData - no API call
     func fetchAccounts() {
+        guard let context = modelContext else { return }
+        
         isLoading = true
-        APIClient.shared.request("/accounts") { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.accounts = response.data
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Failed to load accounts: \(error.localizedDescription)"
-                }
-            }
+        do {
+            let descriptor = FetchDescriptor<SDAccount>(sortBy: [SortDescriptor(\.name)])
+            accounts = try context.fetch(descriptor)
+            isLoading = false
+        } catch {
+            errorMessage = "Failed to load accounts: \(error)"
+            isLoading = false
         }
     }
     
-    var parentOptions: [Account] {
-        // Parent must be same category and not self
+    var parentOptions: [SDAccount] {
         accounts.filter { $0.category == category && $0.id != accountID }
     }
     
-    var relatedAccountOptions: [Account] {
-        // Typically Asset/Liability/Expense, not self
+    var relatedAccountOptions: [SDAccount] {
         accounts.filter { ($0.category == "Asset" || $0.category == "Liability" || $0.category == "Expense") && $0.id != accountID }
     }
     
+    /// Save to LOCAL SwiftData with isSynced=false - no API call
     func save() {
+        guard let context = modelContext else {
+            errorMessage = "Database not available"
+            return
+        }
+        
         isSaving = true
         errorMessage = nil
         
-        struct UpdateAccountRequest: Encodable {
-            let name: String
-            let type: String
-            let category: String
-            let currency: String
-            let parent_id: String?
-            let related_account_id: String?
-        }
+        let accId = accountID
+        let descriptor = FetchDescriptor<SDAccount>(predicate: #Predicate { $0.id == accId })
         
-        let req = UpdateAccountRequest(
-            name: name,
-            type: type,
-            category: category,
-            currency: currency,
-            parent_id: parentID,
-            related_account_id: relatedAccountID
-        )
-        
-        APIClient.shared.request("/accounts/\(accountID)", method: "PUT", body: req) { (result: Result<AccountListResponse, APIClient.APIError>) in
-            DispatchQueue.main.async {
-                self.isSaving = false
-                switch result {
-                case .success(let response):
-                    if response.success {
-                        self.successMessage = "Account updated!"
-                    } else {
-                        self.errorMessage = "Failed to update"
-                    }
-                case .failure(let error):
-                    self.errorMessage = "Error: \(error.localizedDescription)"
-                }
+        do {
+            if let existing = try context.fetch(descriptor).first {
+                existing.name = name
+                existing.type = type
+                existing.category = category
+                existing.currency = currency
+                existing.parentID = parentID
+                existing.isSynced = false  // Mark for sync
+                existing.updatedAt = Date()
+                
+                try context.save()
+                isSaving = false
+                successMessage = "Account updated!"
+            } else {
+                errorMessage = "Account not found locally"
+                isSaving = false
             }
+        } catch {
+            errorMessage = "Failed to save: \(error)"
+            isSaving = false
         }
     }
 }
@@ -99,6 +101,7 @@ class EditAccountViewModel: ObservableObject {
 struct EditAccountView: View {
     @StateObject private var viewModel: EditAccountViewModel
     @Environment(\.presentationMode) var presentationMode
+    @Environment(\.modelContext) private var modelContext
     
     init(account: Account) {
         _viewModel = StateObject(wrappedValue: EditAccountViewModel(account: account))
@@ -134,16 +137,6 @@ struct EditAccountView: View {
                         Text(acc.name).tag(acc.id)
                     }
                 }
-                
-                Picker("Related Account", selection: Binding(
-                    get: { viewModel.relatedAccountID ?? "" },
-                    set: { viewModel.relatedAccountID = $0.isEmpty ? nil : $0 }
-                )) {
-                    Text("None").tag("")
-                    ForEach(viewModel.relatedAccountOptions, id: \.id) { acc in
-                        Text("\(acc.name) (\(acc.category))").tag(acc.id)
-                    }
-                }
             }
             
             if let error = viewModel.errorMessage {
@@ -170,7 +163,7 @@ struct EditAccountView: View {
             }
         }
         .onAppear {
-            viewModel.fetchAccounts()
+            viewModel.setModelContext(modelContext)
         }
     }
 }
