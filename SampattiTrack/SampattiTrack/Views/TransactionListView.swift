@@ -5,42 +5,67 @@ struct TransactionListView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject var syncManager: SyncManager
     
-    @Query(
-        sort: \SDTransaction.date,
-        order: .reverse
-    ) private var transactions: [SDTransaction]
-    
     @State private var searchText = ""
-    @State private var isRefreshing = false
-    
-    // Optional account filter
     var accountID: String?
     
     init(accountID: String? = nil) {
         self.accountID = accountID
-        // Filter query if accountID is present
-        // Note: Dynamic predicate in init is tricky with @Query,
-        // so we filter in memory or use a custom init with Predicate if needed.
-        // For now, simpler to filter in `filteredTransactions`.
     }
     
-    var filteredTransactions: [SDTransaction] {
-        var result = transactions
+    var body: some View {
+        TransactionListContent(accountID: accountID, searchText: searchText)
+            .navigationTitle("Transactions")
+            .navigationDestination(for: SDTransaction.self) { transaction in
+                EditTransactionView(transaction: transaction.toTransaction)
+            }
+            .searchable(text: $searchText, prompt: "Search transactions...")
+            .refreshable {
+                await syncManager.syncAll()
+            }
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: AddTransactionView()) {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+    }
+}
+
+private struct TransactionListContent: View {
+    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var syncManager: SyncManager
+
+    @Query private var transactions: [SDTransaction]
+    let accountID: String?
+
+    init(accountID: String?, searchText: String) {
+        self.accountID = accountID
+
+        let predicate: Predicate<SDTransaction>
         
-        if let accountID = accountID {
-            // Filter by account participation
-            result = result.filter { t in
-                t.postings?.contains(where: { $0.accountID == accountID }) ?? false
+        if let accountID {
+            if searchText.isEmpty {
+                predicate = #Predicate<SDTransaction> { t in
+                    (t.postings ?? []).contains { $0.accountID == accountID }
+                }
+            } else {
+                predicate = #Predicate<SDTransaction> { t in
+                    (t.postings ?? []).contains { $0.accountID == accountID } &&
+                    t.desc.localizedStandardContains(searchText)
+                }
+            }
+        } else {
+            if searchText.isEmpty {
+                 predicate = #Predicate<SDTransaction> { _ in true }
+            } else {
+                predicate = #Predicate<SDTransaction> { t in
+                    t.desc.localizedStandardContains(searchText)
+                }
             }
         }
         
-        if !searchText.isEmpty {
-            result = result.filter {
-                $0.desc.localizedCaseInsensitiveContains(searchText)
-            }
-        }
-        
-        return result
+        _transactions = Query(filter: predicate, sort: \SDTransaction.date, order: .reverse)
     }
     
     var body: some View {
@@ -52,7 +77,7 @@ struct TransactionListView: View {
                         .foregroundColor(.secondary)
                     Text("No transactions found")
                         .foregroundColor(.secondary)
-                    Button("Sync Now") {
+                     Button("Sync Now") {
                         Task {
                             await syncManager.syncAll()
                         }
@@ -60,9 +85,8 @@ struct TransactionListView: View {
                 }
             } else {
                 List {
-                    ForEach(filteredTransactions) { transaction in
+                    ForEach(transactions) { transaction in
                         // OPTIMIZATION: Use value-based navigation to defer the creation of the destination view.
-                        // This prevents `transaction.toTransaction` (expensive deep copy) from running for every row.
                         NavigationLink(value: transaction) {
                             TransactionRowView(
                                 transaction: transaction,
@@ -75,142 +99,113 @@ struct TransactionListView: View {
                 .listStyle(PlainListStyle())
             }
         }
-        .navigationTitle("Transactions")
-        .navigationDestination(for: SDTransaction.self) { transaction in
-            EditTransactionView(transaction: transaction.toTransaction)
-        }
-        .searchable(text: $searchText, prompt: "Search transactions...")
-        .refreshable {
-            await syncManager.syncAll()
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                NavigationLink(destination: AddTransactionView()) {
-                    Image(systemName: "plus")
-                }
-            }
-        }
     }
     
     private func deleteTransactions(offsets: IndexSet) {
         for index in offsets {
-            let transaction = filteredTransactions[index]
+            let transaction = transactions[index]
             // Mark as deleted for sync
             transaction.isDeleted = true
             transaction.isSynced = false
-            // Ideally we keep it but hide it?
-            // Or delete from Context but tracking ID?
-            // "Soft Delete" strategy:
-            // For now, just delete from context and hope SyncManager tracks it?
-            // No, SyncManager needs 'Deleted' items to push delete to server.
-            // If we delete from context, it's gone.
-            
-            // For MVP: We just delete from context. Push Deletion is NOT implemented in current plan.
-            // The plan said "Soft delete for sync".
-            // So we should NOT delete from context but set `isDeleted = true` and filter them out in `@Query`.
-            
-            // TODO: Update @Query to exclude isDeleted == true
-            // But predicates on Relationships/Complex logic are hard.
-            // Let's just delete for now and accept it won't sync delete to server yet (out of scope for quick rewrite).
-            // Actually, I defined `isDeleted` in model.
-            
             modelContext.delete(transaction)
         }
     }
-    // MARK: - Transaction Row
-    struct TransactionRowView: View {
-        let transaction: SDTransaction
-        let accountID: String?
-        
-        var transactionType: Transaction.TransactionType {
-            // If viewing from account context, use simple inflow/outflow logic
-            if let accountID = accountID {
-                return transaction.amountForAccount(accountID) > 0 ? .income : .expense
-            }
-            // Otherwise use smart category-based logic
-            return transaction.determineType()
+}
+
+// MARK: - Transaction Row
+// Moved out of TransactionListView to be accessible by TransactionListContent
+private struct TransactionRowView: View {
+    let transaction: SDTransaction
+    let accountID: String?
+
+    var transactionType: Transaction.TransactionType {
+        // If viewing from account context, use simple inflow/outflow logic
+        if let accountID = accountID {
+            return transaction.amountForAccount(accountID) > 0 ? .income : .expense
         }
-        
-        var displayAmount: String {
-            if let accountID = accountID {
-                let amount = transaction.amountForAccount(accountID)
-                let prefix = amount > 0 ? "+" : ""
-                return "\(prefix)\(CurrencyFormatter.formatCheck(abs(amount)))"
-            }
-            return CurrencyFormatter.formatCheck(transaction.displayAmount)
+        // Otherwise use smart category-based logic
+        return transaction.determineType()
+    }
+
+    var displayAmount: String {
+        if let accountID = accountID {
+            let amount = transaction.amountForAccount(accountID)
+            let prefix = amount > 0 ? "+" : ""
+            return "\(prefix)\(CurrencyFormatter.formatCheck(abs(amount)))"
         }
-        
-        var amountColor: Color {
-            switch transactionType {
-            case .expense:
-                return .red
-            case .income:
-                return .green
-            case .transfer:
-                return .blue
-            }
+        return CurrencyFormatter.formatCheck(transaction.displayAmount)
+    }
+
+    var amountColor: Color {
+        switch transactionType {
+        case .expense:
+            return .red
+        case .income:
+            return .green
+        case .transfer:
+            return .blue
         }
-        
-        var iconName: String {
-            switch transactionType {
-            case .expense:
-                return "arrow.up.circle.fill"
-            case .income:
-                return "arrow.down.circle.fill"
-            case .transfer:
-                return "arrow.left.arrow.right.circle.fill"
-            }
+    }
+
+    var iconName: String {
+        switch transactionType {
+        case .expense:
+            return "arrow.up.circle.fill"
+        case .income:
+            return "arrow.down.circle.fill"
+        case .transfer:
+            return "arrow.left.arrow.right.circle.fill"
         }
-        // Get all unique account IDs from postings
-        var accountIds: String {
-            let ids = transaction.postings?.compactMap { $0.accountID } ?? []
-            return ids.joined(separator: " → ")
-        }
-        
-        var body: some View {
-            HStack(spacing: 12) {
-                // Icon
-                Image(systemName: iconName)
-                    .font(.title2)
-                    .foregroundColor(amountColor)
+    }
+    // Get all unique account IDs from postings
+    var accountIds: String {
+        let ids = transaction.postings?.compactMap { $0.accountID } ?? []
+        return ids.joined(separator: " → ")
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Icon
+            Image(systemName: iconName)
+                .font(.title2)
+                .foregroundColor(amountColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Description or fallback to accounts
+                Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
+                    .font(.headline)
+                    .lineLimit(1)
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    // Description or fallback to accounts
-                    Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
-                        .font(.headline)
-                        .lineLimit(1)
-                    
-                    // Show accounts on second line
-                    Text(accountIds)
-                        .font(.caption)
+                // Show accounts on second line
+                Text(accountIds)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    Text(transaction.date)
+                        .font(.caption2)
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
                     
-                    HStack(spacing: 4) {
-                        Text(transaction.date)
+                    if let note = transaction.note, !note.isEmpty {
+                        Text("•")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        
-                        if let note = transaction.note, !note.isEmpty {
-                            Text("•")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(note)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                
-                Spacer()
-                
-                Text(displayAmount)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(amountColor)
             }
-            .padding(.vertical, 4)
+
+            Spacer()
+
+            Text(displayAmount)
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(amountColor)
         }
+        .padding(.vertical, 4)
     }
 }
