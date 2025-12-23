@@ -21,6 +21,7 @@ struct SampattiTrackApp: App {
                 SDPosting.self,
                 SDTag.self,
                 SDUnit.self,
+                SDPrice.self,
                 SyncQueueItem.self,
             ])
             let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

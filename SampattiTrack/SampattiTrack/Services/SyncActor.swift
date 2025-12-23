@@ -81,6 +81,15 @@ struct UnitDTO: Codable, Sendable {
     let type: String
 }
 
+struct PriceDTO: Codable, Sendable {
+    let id: UUID
+    let commodity: String
+    let date: String
+    let price: String
+    let currency: String
+    let source: String?
+}
+
 struct SyncResponseDTO: Codable {
     let success: Bool
     let tags: [TagDTO]
@@ -259,12 +268,14 @@ actor SyncActor {
         let accounts = try await fetchAccounts()
         let units = try await fetchUnits()
         let transactions = try await fetchTransactions()
+        let prices = try await fetchPrices()
         
         print("[SyncActor] Upserting data (incremental sync)...")
         // Use upsert instead of delete-all to prevent data invalidation
         try upsertTags(tags)
         try upsertAccounts(accounts)
         try upsertUnits(units)
+        try upsertPrices(prices)
         try upsertTransactions(transactions)
         
         print("[SyncActor] Pull complete")
@@ -382,6 +393,7 @@ actor SyncActor {
         try modelContext.delete(model: SDAccount.self)
         try modelContext.delete(model: SDTag.self)
         try modelContext.delete(model: SDUnit.self)
+        try modelContext.delete(model: SDPrice.self)
         try modelContext.save()
     }
     
@@ -492,6 +504,55 @@ actor SyncActor {
         }
         try modelContext.save()
         print("[SyncActor] Upserted \(units.count) units")
+    }
+    
+    nonisolated private func fetchPrices() async throws -> [PriceDTO] {
+        struct PriceListResponse: Codable {
+            let success: Bool
+            let data: [PriceDTO]
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/prices/stats", method: "GET") { (result: Result<PriceListResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func upsertPrices(_ prices: [PriceDTO]) throws {
+        print("[SyncActor] Upserting \(prices.count) prices...")
+        
+        for priceDTO in prices {
+            // Check if price exists for this unit+date combination
+            let fetchDesc = FetchDescriptor<SDPrice>(
+                predicate: #Predicate { $0.unitCode == priceDTO.commodity && $0.date == priceDTO.date }
+            )
+            
+            if let existing = try? modelContext.fetch(fetchDesc).first {
+                // Update existing price
+                existing.price = priceDTO.price
+                existing.currency = priceDTO.currency
+                existing.source = priceDTO.source
+            } else {
+                // Insert new price
+                let newPrice = SDPrice(
+                    id: priceDTO.id,
+                    unitCode: priceDTO.commodity,
+                    date: priceDTO.date,
+                    price: priceDTO.price,
+                    currency: priceDTO.currency,
+                    source: priceDTO.source
+                )
+                modelContext.insert(newPrice)
+            }
+        }
+        try modelContext.save()
+        print("[SyncActor] Upserted \(prices.count) prices")
     }
     
     private func upsertTransactions(_ transactions: [TransactionDTO]) throws {
@@ -659,62 +720,6 @@ actor SyncActor {
                 processed += batch.count
                 try? modelContext.save()
                 print("[SyncActor] Saved batch: \(processed)/\(transactions.count)")
-            }
-        }
-    }
-    
-    // MARK: - XIRR Fetching
-    
-    private func fetchAndCacheXIRR(for accounts: [AccountDTO]) async throws {
-        print("[SyncActor] Fetching XIRR for investment accounts...")
-        
-        let investmentAccounts = accounts.filter { $0.type == "Investment" }
-        
-        guard !investmentAccounts.isEmpty else {
-            print("[SyncActor] No investment accounts found")
-            return
-        }
-        
-        print("[SyncActor] Found \(investmentAccounts.count) investment accounts")
-        
-        for account in investmentAccounts {
-            // Fetch XIRR from API
-            if let xirr = try? await fetchXIRRForAccount(accountId: account.id) {
-                // Update cached XIRR in SDAccount
-                let accountDescriptor = FetchDescriptor<SDAccount>(
-                    predicate: #Predicate { $0.id == account.id }
-                )
-                
-                if let sdAccount = try? modelContext.fetch(accountDescriptor).first {
-                    sdAccount.cachedXIRR = xirr
-                    sdAccount.xirrCachedAt = Date()
-                    try? modelContext.save()
-                    print("[SyncActor] ✓ Cached XIRR for \(account.name): \(String(format: "%.2f%%", xirr))")
-                }
-            }
-        }
-    }
-    
-    nonisolated private func fetchXIRRForAccount(accountId: String) async throws -> Double {
-        struct XIRRResponse: Codable {
-            let success: Bool
-            let data: XIRRData
-        }
-        
-        struct XIRRData: Codable {
-            let account_id: String
-            let xirr: Double
-        }
-        
-        return try await withCheckedThrowingContinuation { continuation in
-            let endpoint = "/analysis/xirr?account_id=\(accountId)"
-            APIClient.shared.request(endpoint, method: "GET") { (result: Result<XIRRResponse, APIClient.APIError>) in
-                switch result {
-                case .success(let response):
-                    continuation.resume(returning: response.data.xirr)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
             }
         }
     }

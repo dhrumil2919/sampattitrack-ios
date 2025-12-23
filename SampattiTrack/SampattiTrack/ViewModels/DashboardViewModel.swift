@@ -56,44 +56,32 @@ class DashboardViewModel: ObservableObject {
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
             let recent = calculator.fetchRecentTransactions(limit: 5)
 
-            // Fetch investment accounts with cached XIRR
+            // Calculate investment XIRR using client-side calculator
             let accountsDescriptor = FetchDescriptor<SDAccount>()
             let allAccounts = (try? context.fetch(accountsDescriptor)) ?? []
+            let transactions = (try? context.fetch(FetchDescriptor<SDTransaction>())) ?? []
             
             let investments = allAccounts
                 .filter { $0.type == "Investment" }
                 .compactMap { account -> InvestmentXIRR? in
-                    // Calculate balance from transactions
-                    let transactionsDesc = FetchDescriptor<SDTransaction>()
-                    let transactions = (try? context.fetch(transactionsDesc)) ?? []
+                    // Calculate XIRR using XIRRCalculator
+                    let xirr = self.calculateInvestmentXIRR(
+                        account: account,
+                        transactions: transactions,
+                        context: context
+                    )
                     
-                    var balance: Double = 0
-                    for tx in transactions {
-                        for posting in tx.postings ?? [] {
-                            if posting.accountID == account.id {
-                                balance += Double(posting.amount) ?? 0
-                            }
-                        }
-                    }
-                    
-                    // Only include if has XIRR or substantial balance
-                    if let xirr = account.cachedXIRR {
+                    // Only include if XIRR could be calculated
+                    if let xirrValue = xirr {
                         return InvestmentXIRR(
                             id: account.id,
                             accountName: account.name,
-                            xirr: xirr
-                        )
-                    } else if balance > 100 {
-                        // Include even without XIRR if balance is significant
-                        return InvestmentXIRR(
-                            id: account.id,
-                            accountName: account.name,
-                            xirr: 0 // Placeholder
+                            xirr: xirrValue
                         )
                     }
                     return nil
                 }
-                .sorted { ($0.xirr != 0 ? abs($0.xirr) : -1) > ($1.xirr != 0 ? abs($1.xirr) : -1) }
+                .sorted { abs($0.xirr) > abs($1.xirr) }
                 .prefix(5)
 
             await MainActor.run {
@@ -107,5 +95,66 @@ class DashboardViewModel: ObservableObject {
                 self.topInvestments = Array(investments)
             }
         }
+    }
+    
+    /// Calculate XIRR for an investment account using local transaction and price data
+    private func calculateInvestmentXIRR(account: SDAccount, transactions: [SDTransaction], context: ModelContext) -> Double? {
+        var dates: [Date] = []
+        var amounts: [Double] = []
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        
+        // Collect cash flows from transactions
+        for tx in transactions {
+            for posting in tx.postings ?? [] {
+                if posting.accountID == account.id {
+                    if let date = formatter.date(from: tx.date),
+                       let amount = Double(posting.amount) {
+                        dates.append(date)
+                        amounts.append(amount)
+                    }
+                }
+            }
+        }
+        
+        guard !dates.isEmpty else { return nil }
+        
+        // Calculate current market value using latest prices
+        var currentValue: Double = 0
+        
+        // Group postings by unit to calculate quantity held
+        var unitQuantities: [String: Double] = [:]
+        for tx in transactions {
+            for posting in tx.postings ?? [] {
+                if posting.accountID == account.id,
+                   let unitCode = posting.unitCode,
+                   let quantity = Double(posting.quantity ?? posting.amount) {
+                    unitQuantities[unitCode, default: 0] += quantity
+                }
+            }
+        }
+        
+        // Get latest prices for each unit
+        for (unitCode, quantity) in unitQuantities {
+            var priceFetchDesc = FetchDescriptor<SDPrice>(
+                predicate: #Predicate { $0.unitCode == unitCode },
+                sortBy: [SortDescriptor(\.date, order: .reverse)]
+            )
+            priceFetchDesc.fetchLimit = 1
+            
+            if let latestPrice = try? context.fetch(priceFetchDesc).first,
+               let priceValue = Double(latestPrice.price) {
+                currentValue += quantity * priceValue
+            }
+        }
+        
+        // Add current value as final "exit" cash flow
+        if currentValue > 0 {
+            dates.append(Date())
+            amounts.append(currentValue)  // Positive = current market value
+        }
+        
+        return XIRRCalculator.calculateXIRR(dates: dates, amounts: amounts)
     }
 }
