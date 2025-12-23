@@ -119,35 +119,15 @@ class AccountDetailViewModel: ObservableObject {
         }
     }
     
-    /// Fetch and cache XIRR from API
-    func fetchXIRR(apiClient: APIClient, account: SDAccount, context: ModelContext) async {
-        do {
-            let response = try await apiClient.request(
-                "/api/v1/analysis/xirr/\(accountID)",
-                method: "GET",
-                body: nil as String?
-            )
-            
-            if let data = response.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let dataObj = json["data"] as? [String: Any],
-               let xirr = dataObj["xirr"] as? Double {
-                
-                // Cache in SDAccount
-                await MainActor.run {
-                    account.cachedXIRR = xirr
-                    account.xirrCachedAt = Date()
-                    try? context.save()
-                    
-                    // Update published metrics
-                    if var metrics = self.investmentMetrics {
-                        metrics.xirr = xirr
-                        self.investmentMetrics = metrics
-                    }
+    /// Load cached XIRR from SDAccount if available
+    func loadCachedXIRR(account: SDAccount) {
+        if let xirr = account.cachedXIRR {
+            Task { @MainActor in
+                if var metrics = self.investmentMetrics {
+                    metrics.xirr = xirr
+                    self.investmentMetrics = metrics
                 }
             }
-        } catch {
-            print("[XIRR] Failed to fetch XIRR for \(accountID): \(error)")
         }
     }
 }
