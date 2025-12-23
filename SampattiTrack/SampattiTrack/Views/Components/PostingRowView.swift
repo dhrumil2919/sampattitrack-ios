@@ -75,6 +75,7 @@ struct PostingRowView: View {
             .keyboardType(.decimalPad)
             .textFieldStyle(RoundedBorderTextFieldStyle())
             .frame(width: 80)
+            .accessibilityLabel("Quantity")
             
             // Price indicator
             Text("@ \(posting.price)")
@@ -88,6 +89,8 @@ struct PostingRowView: View {
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .foregroundColor((Double(posting.amount) ?? 0) < 0 ? .red : .green)
                 .opacity(0.7)
+                .accessibilityLabel("Amount")
+                .accessibilityHint("Calculated based on quantity and price")
         }
     }
 }
@@ -229,6 +232,7 @@ struct LocalTagChip: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .accessibilityLabel("Remove tag \(name)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
