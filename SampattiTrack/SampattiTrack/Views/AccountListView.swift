@@ -21,8 +21,11 @@ struct AccountListView: View {
     }
     
     var filteredAccounts: [SDAccount] {
+        let parentIDs = Set(accounts.compactMap { $0.parentID })
         var result = accounts.filter { $0.category == selectedCategory.rawValue }
         
+        result = result.filter { !parentIDs.contains($0.id) }
+
         if !searchText.isEmpty {
             result = result.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         }
