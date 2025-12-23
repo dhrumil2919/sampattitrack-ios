@@ -516,6 +516,62 @@ actor SyncActor {
             }
         }
     }
+    
+    // MARK: - XIRR Fetching
+    
+    private func fetchAndCacheXIRR(for accounts: [AccountDTO]) async throws {
+        print("[SyncActor] Fetching XIRR for investment accounts...")
+        
+        let investmentAccounts = accounts.filter { $0.type == "Investment" }
+        
+        guard !investmentAccounts.isEmpty else {
+            print("[SyncActor] No investment accounts found")
+            return
+        }
+        
+        print("[SyncActor] Found \(investmentAccounts.count) investment accounts")
+        
+        for account in investmentAccounts {
+            // Fetch XIRR from API
+            if let xirr = try? await fetchXIRRForAccount(accountId: account.id) {
+                // Update cached XIRR in SDAccount
+                let accountDescriptor = FetchDescriptor<SDAccount>(
+                    predicate: #Predicate { $0.id == account.id }
+                )
+                
+                if let sdAccount = try? modelContext.fetch(accountDescriptor).first {
+                    sdAccount.cachedXIRR = xirr
+                    sdAccount.xirrCachedAt = Date()
+                    try? modelContext.save()
+                    print("[SyncActor] ✓ Cached XIRR for \(account.name): \(String(format: "%.2f%%", xirr))")
+                }
+            }
+        }
+    }
+    
+    nonisolated private func fetchXIRRForAccount(accountId: String) async throws -> Double {
+        struct XIRRResponse: Codable {
+            let success: Bool
+            let data: XIRRData
+        }
+        
+        struct XIRRData: Codable {
+            let account_id: String
+            let xirr: Double
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            let endpoint = "/analysis/xirr?account_id=\(accountId)"
+            APIClient.shared.request(endpoint, method: "GET") { (result: Result<XIRRResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data.xirr)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Array Extension

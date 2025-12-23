@@ -6,7 +6,6 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
 
     // Navigation States
-    @State private var showingVizView = false
     @State private var showingTagsView = false
     
     var body: some View {
@@ -25,7 +24,7 @@ struct DashboardView: View {
                         // Net Worth Hero Card
                         NetWorthCard(netWorth: summary.netWorth, growth: summary.netWorthGrowth)
                             .onTapGesture {
-                                showingVizView = true
+                                // Visualization removed
                             }
                         
                         // Quick Stats Grid
@@ -81,13 +80,13 @@ struct DashboardView: View {
                             debtToAssetRatio: summary.debtToAssetRatio
                         )
                         
-                        // Net Worth Trend
-                        if !viewModel.netWorthHistory.isEmpty {
-                            NetWorthChart(data: viewModel.netWorthHistory)
-                                .onTapGesture {
-                                    showingVizView = true
-                                }
-                        }
+                        // Net Worth Trend (Chart component removed)
+                        // if !viewModel.netWorthHistory.isEmpty {
+                        //     NetWorthChart(data: viewModel.netWorthHistory)
+                        //         .onTapGesture {
+                        //             // Visualization removed
+                        //         }
+                        // }
                         
                         // TEMPORARILY DISABLED: New trend charts causing memory spike
                         // TODO: Investigate SwiftUI Charts memory usage with tuple data
@@ -154,10 +153,6 @@ struct DashboardView: View {
                         }
                         
                         // Hidden Links
-                        NavigationLink(isActive: $showingVizView) {
-                             VizView()
-                        } label: { EmptyView() }
-
                         NavigationLink(isActive: $showingTagsView) {
                             TagListView()
                         } label: { EmptyView() }
