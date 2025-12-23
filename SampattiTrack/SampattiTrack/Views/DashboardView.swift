@@ -362,6 +362,75 @@ struct PortfolioKPIGrid: View {
                     subtitle: "Annualized"
                 )
             }
+
+            // Groups Breakdown
+            if !metrics.groups.isEmpty {
+                ForEach(metrics.groups) { group in
+                    Divider()
+                        .padding(.vertical, 8)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(group.name)
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+
+                        // 2x2 Grid for Group
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            // Invested
+                            VStack(alignment: .leading) {
+                                Text("Invested")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(CurrencyFormatter.format(String(group.totalInvested)))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.blue)
+                            }
+
+                            // Current
+                            VStack(alignment: .leading) {
+                                Text("Current")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(CurrencyFormatter.format(String(group.totalCurrentValue)))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.cyan)
+                            }
+
+                            // Return
+                            VStack(alignment: .leading) {
+                                Text("Return")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                HStack(spacing: 2) {
+                                    Text(CurrencyFormatter.format(String(group.totalAbsoluteReturn)))
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(group.totalAbsoluteReturn >= 0 ? .green : .red)
+                                    Text("(\(String(format: "%.1f%%", group.returnPercentage)))")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            // XIRR
+                            VStack(alignment: .leading) {
+                                Text("XIRR")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(String(format: "%.2f%%", group.weightedXIRR))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(group.weightedXIRR >= 0 ? .green : .red)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemBackground).opacity(0.5))
+                    .cornerRadius(8)
+                }
+            }
         }
         .padding()
         .background(Color(.systemBackground))

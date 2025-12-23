@@ -2,11 +2,26 @@ import Foundation
 import Combine
 import SwiftData
 
+struct PortfolioGroupMetrics: Identifiable {
+    let id: String
+    let name: String
+    var totalInvested: Double
+    var totalCurrentValue: Double
+    var totalAbsoluteReturn: Double
+    var weightedXIRR: Double
+
+    var returnPercentage: Double {
+        guard totalInvested > 0 else { return 0 }
+        return (totalAbsoluteReturn / totalInvested) * 100
+    }
+}
+
 struct AggregatePortfolioMetrics {
     var totalInvested: Double = 0
     var totalCurrentValue: Double = 0
     var totalAbsoluteReturn: Double = 0
     var weightedXIRR: Double = 0
+    var groups: [PortfolioGroupMetrics] = []
     
     var returnPercentage: Double {
         guard totalInvested > 0 else { return 0 }
@@ -70,6 +85,10 @@ class DashboardViewModel: ObservableObject {
             var totalWeightedXIRR: Double = 0
             var totalWeight: Double = 0
             
+            // Temporary storage for group aggregation
+            // Key: GroupID, Value: (Invested, Current, AbsoluteReturn, WeightedXIRR_Accumulator, Invested_Accumulator_For_XIRR)
+            var groupAggregates: [String: (invested: Double, current: Double, absReturn: Double, xirrWeighted: Double, xirrWeight: Double)] = [:]
+
             for account in allAccounts.filter({ $0.type == "Investment" }) {
                 // Extract metrics from metadata
                 guard let metaDict = account.metadataDictionary,
@@ -91,12 +110,56 @@ class DashboardViewModel: ObservableObject {
                 // Weight XIRR by invested amount
                 totalWeightedXIRR += xirr * invested
                 totalWeight += invested
+
+                // --- Grouping Logic ---
+                let groupID: String
+                if account.id == "Assets:Gold" {
+                    groupID = account.id
+                } else {
+                    groupID = account.parentID ?? account.id
+                }
+
+                var currentGroup = groupAggregates[groupID] ?? (0, 0, 0, 0, 0)
+                currentGroup.invested += invested
+                currentGroup.current += current
+                currentGroup.absReturn += absReturn
+                currentGroup.xirrWeighted += xirr * invested
+                currentGroup.xirrWeight += invested
+                groupAggregates[groupID] = currentGroup
             }
             
-            // Calculate weighted average XIRR
+            // Calculate weighted average XIRR for total
             if totalWeight > 0 {
                 aggregateMetrics.weightedXIRR = totalWeightedXIRR / totalWeight
             }
+
+            // Process Groups
+            var groups: [PortfolioGroupMetrics] = []
+            for (groupID, data) in groupAggregates {
+                let finalXIRR = data.xirrWeight > 0 ? (data.xirrWeighted / data.xirrWeight) : 0
+
+                // Resolve Name
+                var groupName = groupID
+                if let groupAccount = allAccounts.first(where: { $0.id == groupID }) {
+                    groupName = groupAccount.name
+                } else {
+                    // Fallback to last segment of ID
+                    groupName = groupID.split(separator: ":").last.map(String.init) ?? groupID
+                }
+
+                let groupMetric = PortfolioGroupMetrics(
+                    id: groupID,
+                    name: groupName,
+                    totalInvested: data.invested,
+                    totalCurrentValue: data.current,
+                    totalAbsoluteReturn: data.absReturn,
+                    weightedXIRR: finalXIRR
+                )
+                groups.append(groupMetric)
+            }
+
+            // Sort groups by current value descending
+            aggregateMetrics.groups = groups.sorted(by: { $0.totalCurrentValue > $1.totalCurrentValue })
 
             await MainActor.run {
                 // Use API-cached net worth if available (matches web frontend approach)
