@@ -28,6 +28,11 @@ class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    // New: Monthly trend data for charts
+    @Published var monthlyExpenses: [(month: String, amount: Double)] = []
+    @Published var monthlyIncome: [(month: String, amount: Double)] = []
+    @Published var monthlySavings: [(month: String, savings: Double)] = []
+    
     @Published var selectedRange: DateRange = .lastMonth() {
         didSet {
             calculateClientSideData()
@@ -75,6 +80,9 @@ class DashboardViewModel: ObservableObject {
     private func calculateClientSideData() {
         guard let container = container else { return }
         
+        // Use YTD range for trend charts (more data points)
+        let trendRange = DateRange.ytd()
+        
         Task.detached(priority: .userInitiated) {
             // Create a new context on this background thread
             let context = ModelContext(container)
@@ -88,6 +96,11 @@ class DashboardViewModel: ObservableObject {
             let tags = calculator.calculateTagBreakdown(range: self.selectedRange)
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
             let recent = calculator.fetchRecentTransactions(limit: 5)
+            
+            // New: Monthly trends for charts (using YTD for more data points)
+            let expenses = calculator.calculateMonthlyExpenses(range: trendRange)
+            let income = calculator.calculateMonthlyIncome(range: trendRange)
+            let savings = calculator.calculateMonthlySavings(range: trendRange)
 
             await MainActor.run {
                 self.summary = summaryData
@@ -95,6 +108,11 @@ class DashboardViewModel: ObservableObject {
                 self.topTags = tags
                 self.monthlyTagSpending = spending
                 self.recentTransactions = recent
+                
+                // New: Monthly trends
+                self.monthlyExpenses = expenses
+                self.monthlyIncome = income
+                self.monthlySavings = savings
             }
         }
     }

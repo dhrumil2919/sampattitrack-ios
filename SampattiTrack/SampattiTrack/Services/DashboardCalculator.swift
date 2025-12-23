@@ -22,6 +22,12 @@ struct ClientDashboardData {
     let netWorthGrowth: Double
     let expenseGrowth: Double
     let savingsRateChange: Double
+    
+    // New KPI Metrics
+    let cashFlowRatio: Double        // income / expenses (> 1 = positive cash flow)
+    let monthlyBurnRate: Double      // average monthly expenses
+    let runwayDays: Int              // assets / daily burn rate
+    let debtToAssetRatio: Double     // liabilities / assets (as positive percentage)
 
     // Helper to convert to DashboardData (if needed) but we use this struct in ViewModel now.
 }
@@ -60,36 +66,95 @@ struct DateRange {
 
 class DashboardCalculator {
     private let modelContext: ModelContext
+    
+    // MARK: - Caching for Performance
+    private var cachedTransactions: [SDTransaction]?
+    private var cacheDate: Date?
+    private let cacheExpiry: TimeInterval = 60 // 1 minute cache
+    
+    // Cached posting aggregates for net worth calculation
+    private var cachedAssets: Double?
+    private var cachedLiabilities: Double?
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+    
+    /// Invalidate cache when data changes
+    func invalidateCache() {
+        cachedTransactions = nil
+        cacheDate = nil
+        cachedAssets = nil
+        cachedLiabilities = nil
+    }
+    
+    /// Get cached transactions or fetch fresh if expired
+    private func getCachedTransactions() -> [SDTransaction] {
+        if let cached = cachedTransactions,
+           let date = cacheDate,
+           Date().timeIntervalSince(date) < cacheExpiry {
+            return cached
+        }
+        let transactions = fetchAllTransactionsInternal()
+        cachedTransactions = transactions
+        cacheDate = Date()
+        return transactions
     }
 
     // MARK: - Summary
 
     func calculateSummary(range: DateRange) -> ClientDashboardData {
-        let transactions = fetchTransactions(in: range)
+        // Use cached transactions for ALL calculations
+        let allTransactions = getCachedTransactions()
+        
+        // Filter for the selected range
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let startStr = formatter.string(from: range.start)
+        let endStr = formatter.string(from: range.end)
+        
+        let rangeTransactions = allTransactions.filter { $0.date >= startStr && $0.date <= endStr }
+        
+        let income = calculateTotal(transactions: rangeTransactions, type: .income)
+        let expenses = calculateTotal(transactions: rangeTransactions, type: .expense)
 
-        let income = calculateTotal(transactions: transactions, type: .income)
-        let expenses = calculateTotal(transactions: transactions, type: .expense)
-
-        // YTD Logic needs a separate query if range is not YTD
+        // YTD - filter from cached transactions
         let ytdRange = DateRange.ytd()
-        let ytdTransactions = fetchTransactions(in: ytdRange)
+        let ytdStartStr = formatter.string(from: ytdRange.start)
+        let ytdEndStr = formatter.string(from: ytdRange.end)
+        let ytdTransactions = allTransactions.filter { $0.date >= ytdStartStr && $0.date <= ytdEndStr }
         let ytdIncome = calculateTotal(transactions: ytdTransactions, type: .income)
         let ytdExpenses = calculateTotal(transactions: ytdTransactions, type: .expense)
         let ytdSavings = ytdIncome - ytdExpenses
 
-        // Net Worth is point-in-time (Now)
-        let (assets, liabilities) = calculateNetWorthComponents()
+        // Net Worth is point-in-time (Now) - use cached components
+        let (assets, liabilities) = calculateNetWorthComponentsCached()
         let netWorth = assets + liabilities // Liabilities are negative
 
         let savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0.0
 
-        let avgGrowth = calculateAverageGrowthRate(range: range)
+        let avgGrowth = calculateAverageGrowthRateCached(allTransactions: allTransactions, range: range)
 
-        // Calculate MoM Metrics (Last 30 Days vs Previous 30 Days) to show current trends
-        let (nwGrowth, expGrowth, savRateChange) = calculateMoMMetrics()
+        // Calculate MoM Metrics using cached transactions
+        let (nwGrowth, expGrowth, savRateChange) = calculateMoMMetricsCached(allTransactions: allTransactions)
+        
+        // Calculate new KPI Metrics
+        let cashFlowRatio = expenses > 0 ? income / expenses : (income > 0 ? Double.infinity : 0)
+        
+        // Monthly burn rate: average expenses over last 6 months
+        let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date())!
+        let sixMonthStr = formatter.string(from: sixMonthsAgo)
+        let recentTransactions = allTransactions.filter { $0.date >= sixMonthStr }
+        let recentExpenses = calculateTotal(transactions: recentTransactions, type: .expense)
+        let monthlyBurnRate = recentExpenses / 6.0
+        
+        // Runway days: assets / daily burn rate
+        let dailyBurnRate = monthlyBurnRate / 30.0
+        let runwayDays = dailyBurnRate > 0 ? Int(assets / dailyBurnRate) : Int.max
+        
+        // Debt-to-asset ratio (as positive percentage)
+        let absLiabilities = abs(liabilities)
+        let debtToAssetRatio = assets > 0 ? (absLiabilities / assets) * 100 : 0
 
         return ClientDashboardData(
             netWorth: String(netWorth),
@@ -98,67 +163,63 @@ class DashboardCalculator {
             yearlyIncome: String(ytdIncome),
             yearlyExpenses: String(ytdExpenses),
             totalAssets: String(assets),
-            totalLiabilities: String(liabilities), // keeping sign logic consistent with display
+            totalLiabilities: String(liabilities),
             savingsRate: savingsRate,
             yearlySavings: String(ytdSavings),
             averageGrowthRate: avgGrowth,
             netWorthGrowth: nwGrowth,
             expenseGrowth: expGrowth,
-            savingsRateChange: savRateChange
+            savingsRateChange: savRateChange,
+            cashFlowRatio: cashFlowRatio,
+            monthlyBurnRate: monthlyBurnRate,
+            runwayDays: min(runwayDays, 9999), // Cap at 9999 for display
+            debtToAssetRatio: debtToAssetRatio
         )
     }
 
-    private func calculateMoMMetrics() -> (Double, Double, Double) {
+    /// Optimized MoM metrics using cached transactions (reduces 4 fetches to 0)
+    private func calculateMoMMetricsCached(allTransactions: [SDTransaction]) -> (Double, Double, Double) {
         let now = Date()
         let calendar = Calendar.current
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
 
         // Define "Current" as Last 30 Days
         guard let startCurrent = calendar.date(byAdding: .day, value: -30, to: now),
               let startPrevious = calendar.date(byAdding: .day, value: -30, to: startCurrent) else {
             return (0, 0, 0)
         }
+        
+        let nowStr = formatter.string(from: now)
+        let startCurrentStr = formatter.string(from: startCurrent)
+        let startPreviousStr = formatter.string(from: startPrevious)
 
-        let currentRange = DateRange(start: startCurrent, end: now, name: "Current")
-        let previousRange = DateRange(start: startPrevious, end: startCurrent.addingTimeInterval(-1), name: "Previous")
-
-        // 1. Expense Growth
-        let currentTx = fetchTransactions(in: currentRange)
-        let previousTx = fetchTransactions(in: previousRange)
+        // Filter from cached transactions instead of fetching
+        let currentTx = allTransactions.filter { $0.date >= startCurrentStr && $0.date <= nowStr }
+        let previousTx = allTransactions.filter { $0.date >= startPreviousStr && $0.date < startCurrentStr }
 
         let currentExpenses = calculateTotal(transactions: currentTx, type: .expense)
         let previousExpenses = calculateTotal(transactions: previousTx, type: .expense)
-
         let expenseGrowth = previousExpenses != 0 ? ((currentExpenses - previousExpenses) / previousExpenses) * 100 : 0.0
 
-        // 2. Savings Rate Change
         let currentIncome = calculateTotal(transactions: currentTx, type: .income)
         let previousIncome = calculateTotal(transactions: previousTx, type: .income)
-
         let currentSavingsRate = currentIncome > 0 ? ((currentIncome - currentExpenses) / currentIncome) * 100 : 0.0
         let previousSavingsRate = previousIncome > 0 ? ((previousIncome - previousExpenses) / previousIncome) * 100 : 0.0
-
         let savingsRateChange = currentSavingsRate - previousSavingsRate
 
-        // 3. Net Worth Growth (Point in Time)
-        // NW Now vs NW 30 days ago
-        let nwNow = calculateNetWorthAt(date: now)
-        let nwPrev = calculateNetWorthAt(date: startCurrent) // 30 days ago
-
+        // Net Worth Growth using cached data
+        let nwNow = calculateNetWorthFromCache(allTransactions, upTo: nowStr)
+        let nwPrev = calculateNetWorthFromCache(allTransactions, upTo: startCurrentStr)
         let nwGrowth = nwPrev != 0 ? ((nwNow - nwPrev) / abs(nwPrev)) * 100 : 0.0
 
         return (nwGrowth, expenseGrowth, savingsRateChange)
     }
-
-    private func calculateNetWorthAt(date: Date) -> Double {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        let dateStr = formatter.string(from: date)
-
-        // Fetch all transactions. Note: This could be optimized by caching or fetching only needed fields.
-        let allTx = fetchAllTransactions()
+    
+    /// Calculate net worth at a point in time using cached transactions
+    private func calculateNetWorthFromCache(_ transactions: [SDTransaction], upTo dateStr: String) -> Double {
         var total: Double = 0
-
-        for tx in allTx {
+        for tx in transactions {
             if tx.date <= dateStr {
                 total += calculateNetImpact(tx)
             }
@@ -194,7 +255,7 @@ class DashboardCalculator {
         // But context.fetch returns [T].
         // Limit properties fetched? Not easily in SwiftData.
 
-        let allTransactions = fetchAllTransactions()
+        let allTransactions = getCachedTransactions()
 
         var currentNetWorth: Double = 0
         var history: [NetWorthDataPoint] = []
@@ -312,6 +373,67 @@ class DashboardCalculator {
             return (month: month, tags: tagsList)
         }
     }
+    
+    // MARK: - Monthly Trend Data for Charts
+    
+    /// Calculate monthly expense totals for trend chart
+    func calculateMonthlyExpenses(range: DateRange) -> [(month: String, amount: Double)] {
+        let allTransactions = getCachedTransactions()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let startStr = formatter.string(from: range.start)
+        let endStr = formatter.string(from: range.end)
+        
+        var monthlyData: [String: Double] = [:]
+        
+        for tx in allTransactions {
+            guard tx.date >= startStr && tx.date <= endStr else { continue }
+            guard tx.determineType() == .expense else { continue }
+            
+            let month = String(tx.date.prefix(7)) // YYYY-MM
+            monthlyData[month, default: 0] += tx.displayAmount
+        }
+        
+        return monthlyData.sorted { $0.key < $1.key }.map { (month: $0.key, amount: $0.value) }
+    }
+    
+    /// Calculate monthly income totals for trend chart
+    func calculateMonthlyIncome(range: DateRange) -> [(month: String, amount: Double)] {
+        let allTransactions = getCachedTransactions()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let startStr = formatter.string(from: range.start)
+        let endStr = formatter.string(from: range.end)
+        
+        var monthlyData: [String: Double] = [:]
+        
+        for tx in allTransactions {
+            guard tx.date >= startStr && tx.date <= endStr else { continue }
+            guard tx.determineType() == .income else { continue }
+            
+            let month = String(tx.date.prefix(7)) // YYYY-MM
+            monthlyData[month, default: 0] += tx.displayAmount
+        }
+        
+        return monthlyData.sorted { $0.key < $1.key }.map { (month: $0.key, amount: $0.value) }
+    }
+    
+    /// Calculate monthly savings (income - expenses) for trend chart
+    func calculateMonthlySavings(range: DateRange) -> [(month: String, savings: Double)] {
+        let incomeData = calculateMonthlyIncome(range: range)
+        let expenseData = calculateMonthlyExpenses(range: range)
+        
+        let incomeMap = Dictionary(uniqueKeysWithValues: incomeData.map { ($0.month, $0.amount) })
+        let expenseMap = Dictionary(uniqueKeysWithValues: expenseData.map { ($0.month, $0.amount) })
+        
+        let allMonths = Set(incomeMap.keys).union(Set(expenseMap.keys)).sorted()
+        
+        return allMonths.map { month in
+            let income = incomeMap[month] ?? 0
+            let expense = expenseMap[month] ?? 0
+            return (month: month, savings: income - expense)
+        }
+    }
 
     // MARK: - Recent Transactions
 
@@ -350,7 +472,8 @@ class DashboardCalculator {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    private func fetchAllTransactions() -> [SDTransaction] {
+    /// Internal fetch that bypasses cache - used by getCachedTransactions()
+    private func fetchAllTransactionsInternal() -> [SDTransaction] {
         let descriptor = FetchDescriptor<SDTransaction>(sortBy: [SortDescriptor(\.date)])
         return (try? modelContext.fetch(descriptor)) ?? []
     }
@@ -387,51 +510,47 @@ class DashboardCalculator {
         return impact
     }
 
-    private func calculateNetWorthComponents() -> (Double, Double) {
-        // Fetch all accounts to determine category
-        // Then sum balances? No, we need sum of all postings ever for those accounts.
-
-        let descriptor = FetchDescriptor<SDPosting>()
-        // This might be huge. Optimization: Fetch accounts, then perform aggregation?
-        // SwiftData doesn't support aggregate queries well yet.
-        // Alternative: Iterate all transactions? Slow.
-
-        // Let's stick to iterating all transactions/postings once or maintaining a cache.
-        // For now, iterating all postings.
-
-        let allPostings = (try? modelContext.fetch(descriptor)) ?? []
-
+    /// Cached version of net worth components calculation
+    private func calculateNetWorthComponentsCached() -> (Double, Double) {
+        // Return cached values if available
+        if let assets = cachedAssets, let liabilities = cachedLiabilities {
+            return (assets, liabilities)
+        }
+        
+        // Calculate from cached transactions
+        let allTransactions = getCachedTransactions()
         var assets: Double = 0
         var liabilities: Double = 0
-
-        for p in allPostings {
-            if let cat = p.category {
-                if cat == "Assets" || cat == "Asset" {
-                    assets += Double(p.amount) ?? 0
-                } else if cat == "Liabilities" || cat == "Liability" {
-                    liabilities += Double(p.amount) ?? 0
+        
+        for tx in allTransactions {
+            guard let postings = tx.postings else { continue }
+            for p in postings {
+                if let cat = p.category {
+                    if cat == "Assets" || cat == "Asset" {
+                        assets += Double(p.amount) ?? 0
+                    } else if cat == "Liabilities" || cat == "Liability" {
+                        liabilities += Double(p.amount) ?? 0
+                    }
                 }
             }
         }
-
+        
+        // Cache the results
+        cachedAssets = assets
+        cachedLiabilities = liabilities
+        
         return (assets, liabilities)
     }
 
-    private func calculateAverageGrowthRate(range: DateRange) -> Double {
-        // Average Month-over-Month Growth Rate (%)
-
-        let history = calculateNetWorthHistory(range: range)
-        // History is now grouped by month (mostly)
-
+    /// Optimized average growth rate using pre-fetched transactions
+    private func calculateAverageGrowthRateCached(allTransactions: [SDTransaction], range: DateRange) -> Double {
+        let history = calculateNetWorthHistoryCached(allTransactions: allTransactions, range: range)
         guard history.count >= 2 else { return 0 }
 
         var growths: [Double] = []
-
-        // Compare consecutive points (which represent month ends)
         for i in 1..<history.count {
             let prev = Double(history[i-1].netWorthValue)
             let curr = Double(history[i].netWorthValue)
-
             if prev != 0 {
                 let growth = (curr - prev) / abs(prev)
                 growths.append(growth)
@@ -439,7 +558,44 @@ class DashboardCalculator {
         }
 
         guard !growths.isEmpty else { return 0 }
-        let avg = growths.reduce(0, +) / Double(growths.count)
-        return avg * 100
+        return (growths.reduce(0, +) / Double(growths.count)) * 100
+    }
+    
+    /// Optimized net worth history using pre-fetched transactions
+    private func calculateNetWorthHistoryCached(allTransactions: [SDTransaction], range: DateRange) -> [NetWorthDataPoint] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let startStr = formatter.string(from: range.start)
+        let endStr = formatter.string(from: range.end)
+
+        var currentNetWorth: Double = 0
+        var history: [NetWorthDataPoint] = []
+        var rangeTransactions: [SDTransaction] = []
+
+        for tx in allTransactions {
+            if tx.date < startStr {
+                currentNetWorth += calculateNetImpact(tx)
+            } else if tx.date <= endStr {
+                rangeTransactions.append(tx)
+            }
+        }
+
+        let grouped = Dictionary(grouping: rangeTransactions) { String($0.date.prefix(7)) }
+        let sortedMonths = grouped.keys.sorted()
+        
+        history.append(NetWorthDataPoint(date: startStr, assets: "0", liabilities: "0", netWorth: String(currentNetWorth)))
+
+        for month in sortedMonths {
+            if let txs = grouped[month] {
+                for tx in txs {
+                    currentNetWorth += calculateNetImpact(tx)
+                }
+                if let lastTxDate = txs.max(by: { $0.date < $1.date })?.date {
+                    history.append(NetWorthDataPoint(date: lastTxDate, assets: "0", liabilities: "0", netWorth: String(currentNetWorth)))
+                }
+            }
+        }
+
+        return history
     }
 }

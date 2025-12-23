@@ -238,17 +238,23 @@ class SyncManager: ObservableObject {
     }
     
     private func updateLocalTransactions(_ transactions: [Transaction]) {
-        // Pre-fetch all tags to link efficiently
-        // In a real optimized scenario, we'd only fetch needed tags, but assuming tag count is small (<100)
+        // OPTIMIZATION: Pre-fetch all tags once for efficient linking
         let tagDescriptor = FetchDescriptor<SDTag>()
         let allTags = (try? modelContext.fetch(tagDescriptor)) ?? []
         let tagMap = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
 
+        // OPTIMIZATION: Batch pre-fetch all existing transactions in one query
+        // instead of individual fetch per transaction (eliminates N+1 problem)
+        let incomingIds = transactions.map { $0.id }
+        let existingDescriptor = FetchDescriptor<SDTransaction>()
+        let allExisting = (try? modelContext.fetch(existingDescriptor)) ?? []
+        let existingMap = Dictionary(uniqueKeysWithValues: allExisting.compactMap { tx -> (UUID, SDTransaction)? in
+            guard incomingIds.contains(tx.id) else { return nil }
+            return (tx.id, tx)
+        })
+
         for transaction in transactions {
-             let id = transaction.id
-             let descriptor = FetchDescriptor<SDTransaction>(predicate: #Predicate { $0.id == id })
-            
-            if let existing = try? modelContext.fetch(descriptor).first {
+            if let existing = existingMap[transaction.id] {
                 // Update fields if needed. If server is authority, overwrite.
                 existing.date = transaction.date
                 existing.desc = transaction.description

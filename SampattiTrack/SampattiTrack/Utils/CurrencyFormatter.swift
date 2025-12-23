@@ -27,4 +27,20 @@ struct CurrencyFormatter {
         guard let doubleValue = Double(value) else { return value }
         return formatCheck(-doubleValue, currency: currency)
     }
+    
+    /// Compact format for chart axes (e.g., 1.2L, 50K)
+    static func formatCompact(_ value: Double) -> String {
+        let absValue = abs(value)
+        let sign = value < 0 ? "-" : ""
+        
+        if absValue >= 10_000_000 {
+            return "\(sign)\(String(format: "%.1f", absValue / 10_000_000))Cr"
+        } else if absValue >= 100_000 {
+            return "\(sign)\(String(format: "%.1f", absValue / 100_000))L"
+        } else if absValue >= 1_000 {
+            return "\(sign)\(String(format: "%.0f", absValue / 1_000))K"
+        } else {
+            return "\(sign)\(String(format: "%.0f", absValue))"
+        }
+    }
 }

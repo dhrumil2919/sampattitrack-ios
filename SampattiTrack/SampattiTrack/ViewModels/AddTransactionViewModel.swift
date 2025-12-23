@@ -18,6 +18,26 @@ class AddTransactionViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var successMessage: String?
     
+    // OPTIMIZATION: Static caching to avoid redundant API calls on every view appearance
+    private static var cachedAccounts: [Account]?
+    private static var cachedUnits: [FinancialUnit]?
+    private static var cachedTags: [Tag]?
+    private static var cacheTimestamp: Date?
+    private static let cacheExpiry: TimeInterval = 300 // 5 minute cache
+    
+    private static var isCacheValid: Bool {
+        guard let timestamp = cacheTimestamp else { return false }
+        return Date().timeIntervalSince(timestamp) < cacheExpiry
+    }
+    
+    /// Clear the static cache (call when data might have changed)
+    static func invalidateCache() {
+        cachedAccounts = nil
+        cachedUnits = nil
+        cachedTags = nil
+        cacheTimestamp = nil
+    }
+    
     struct EditablePosting: Identifiable {
         let id = UUID()
         var accountID: String
@@ -37,6 +57,20 @@ class AddTransactionViewModel: ObservableObject {
     }
     
     func fetchAccounts() {
+        // Use cached data if available and valid
+        if Self.isCacheValid {
+            if let accounts = Self.cachedAccounts {
+                self.accounts = accounts
+            }
+            if let units = Self.cachedUnits {
+                self.units = units
+            }
+            if let tags = Self.cachedTags {
+                self.availableTags = tags
+            }
+            return
+        }
+        
         isLoading = true
         
         // Fetch accounts
@@ -47,6 +81,7 @@ class AddTransactionViewModel: ObservableObject {
                 case .success(let response):
                     if response.success {
                         self.accounts = response.data
+                        Self.cachedAccounts = response.data
                     }
                 case .failure(let error):
                     self.errorMessage = "Failed to load accounts: \(error)"
@@ -61,6 +96,7 @@ class AddTransactionViewModel: ObservableObject {
                 case .success(let response):
                     if response.success {
                         self.units = response.data
+                        Self.cachedUnits = response.data
                     }
                 case .failure:
                     // Don't show error for units, just use defaults
@@ -76,6 +112,8 @@ class AddTransactionViewModel: ObservableObject {
                 case .success(let response):
                     if response.success {
                         self.availableTags = response.data
+                        Self.cachedTags = response.data
+                        Self.cacheTimestamp = Date() // Update timestamp after all data loaded
                     }
                 case .failure:
                     break

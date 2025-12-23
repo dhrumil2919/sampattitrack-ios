@@ -70,12 +70,54 @@ struct DashboardView: View {
                             change: summary.savingsRateChange
                         )
                         
+                        // NEW: KPI Metrics Grid
+                        KPIGridView(
+                            cashFlowRatio: summary.cashFlowRatio,
+                            income: Double(summary.lastMonthIncome) ?? 0,
+                            expenses: Double(summary.lastMonthExpenses) ?? 0,
+                            monthlyBurnRate: summary.monthlyBurnRate,
+                            expenseTrend: summary.expenseGrowth,
+                            runwayDays: summary.runwayDays,
+                            debtToAssetRatio: summary.debtToAssetRatio
+                        )
+                        
                         // Net Worth Trend
                         if !viewModel.netWorthHistory.isEmpty {
                             NetWorthChart(data: viewModel.netWorthHistory)
                                 .onTapGesture {
                                     showingVizView = true
                                 }
+                        }
+                        
+                        // NEW: MoM Expense Trend Chart with Average Line
+                        if !viewModel.monthlyExpenses.isEmpty {
+                            if #available(iOS 16.0, *) {
+                                MoMExpenseTrendChart(monthlyData: viewModel.monthlyExpenses)
+                            }
+                        }
+                        
+                        // NEW: Income Trend Chart with Average Line
+                        if !viewModel.monthlyIncome.isEmpty {
+                            if #available(iOS 16.0, *) {
+                                IncomeTrendChart(monthlyData: viewModel.monthlyIncome)
+                            }
+                        }
+                        
+                        // NEW: Income vs Expenses Comparison
+                        if !viewModel.monthlyIncome.isEmpty || !viewModel.monthlyExpenses.isEmpty {
+                            if #available(iOS 16.0, *) {
+                                IncomeVsExpensesChart(
+                                    monthlyIncome: viewModel.monthlyIncome,
+                                    monthlyExpenses: viewModel.monthlyExpenses
+                                )
+                            }
+                        }
+                        
+                        // NEW: Savings Trend Chart
+                        if !viewModel.monthlySavings.isEmpty {
+                            if #available(iOS 16.0, *) {
+                                SavingsTrendChart(monthlyData: viewModel.monthlySavings)
+                            }
                         }
                         
                         // Expense Pie Chart
