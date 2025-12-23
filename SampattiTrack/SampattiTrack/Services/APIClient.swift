@@ -89,9 +89,8 @@ class APIClient: ObservableObject {
                 let decoded = try JSONDecoder().decode(T.self, from: data)
                 completion(.success(decoded))
             } catch {
-                if let str = String(data: data, encoding: .utf8) {
-                   print("Decoding failed for: \(str)")
-                }
+                // Sentinel: Do not log full response body as it may contain sensitive data
+                print("Decoding failed for endpoint: \(endpoint). Error: \(error)")
                 completion(.failure(.decodingError(error)))
             }
         }.resume()
