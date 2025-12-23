@@ -260,16 +260,12 @@ actor SyncActor {
         let units = try await fetchUnits()
         let transactions = try await fetchTransactions()
         
-        print("[SyncActor] Deleting old local data...")
-        // Batch delete all existing data
-        try deleteAllLocalData()
-        
-        print("[SyncActor] Inserting fresh data...")
-        // Insert fresh data
-        try insertTags(tags)
-        try insertAccounts(accounts)
-        try insertUnits(units)
-        try insertTransactions(transactions)
+        print("[SyncActor] Upserting data (incremental sync)...")
+        // Use upsert instead of delete-all to prevent data invalidation
+        try upsertTags(tags)
+        try upsertAccounts(accounts)
+        try upsertUnits(units)
+        try upsertTransactions(transactions)
         
         print("[SyncActor] Pull complete")
     }
@@ -378,6 +374,7 @@ actor SyncActor {
         return allTransactions
     }
     
+    /// DEPRECATED: Only for initial sync or reset. Use upsert methods for regular sync.
     private func deleteAllLocalData() throws {
         // Use batch delete for maximum efficiency
         try modelContext.delete(model: SDPosting.self)
@@ -388,68 +385,210 @@ actor SyncActor {
         try modelContext.save()
     }
     
-    private func insertTags(_ tags: [TagDTO]) throws {
-        print("[SyncActor] DEBUG: Received \(tags.count) tags from API")
-        if tags.isEmpty {
-            print("[SyncActor] WARNING: API returned 0 tags. Check if backend has tags.")
-        }
-        for tag in tags {
-            let sdTag = SDTag(
-                id: tag.id.uuidString,
-                name: tag.name,
-                desc: tag.description,
-                color: tag.color,
-                isSynced: true
+    // MARK: - Upsert Methods (Incremental Sync)
+    
+    private func upsertTags(_ tags: [TagDTO]) throws {
+        print("[SyncActor] Upserting \(tags.count) tags...")
+        
+        for tagDTO in tags {
+            let tagID = tagDTO.id.uuidString
+            let fetchDesc = FetchDescriptor<SDTag>(
+                predicate: #Predicate { $0.id == tagID }
             )
-            modelContext.insert(sdTag)
+            
+            if let existing = try? modelContext.fetch(fetchDesc).first {
+                // Update existing
+                existing.name = tagDTO.name
+                existing.desc = tagDTO.description
+                existing.color = tagDTO.color
+                existing.isSynced = true
+            } else {
+                // Insert new
+                let newTag = SDTag(
+                    id: tagID,
+                    name: tagDTO.name,
+                    desc: tagDTO.description,
+                    color: tagDTO.color,
+                    isSynced: true
+                )
+                modelContext.insert(newTag)
+            }
         }
         try modelContext.save()
-        print("[SyncActor] DEBUG: Successfully saved \(tags.count) tags to SwiftData")
+        print("[SyncActor] Upserted \(tags.count) tags")
     }
     
-    private func insertAccounts(_ accounts: [AccountDTO]) throws {
-        print("[SyncActor] Inserting \(accounts.count) accounts...")
-        for account in accounts {
+    private func upsertAccounts(_ accounts: [AccountDTO]) throws {
+        print("[SyncActor] Upserting \(accounts.count) accounts...")
+        
+        for accountDTO in accounts {
             // Convert GenericJSON metadata to Data
             var metadataData: Data? = nil
-            if let meta = account.metadata {
+            if let meta = accountDTO.metadata {
                 let dict = meta.mapValues { $0.anyValue }
                 let validDict = dict.compactMapValues { $0 }
                 if !validDict.isEmpty {
                     metadataData = try? JSONSerialization.data(withJSONObject: validDict, options: [])
                 }
             }
+            
+            let fetchDesc = FetchDescriptor<SDAccount>(
+                predicate: #Predicate { $0.id == accountDTO.id }
+            )
+            
+            if let existing = try? modelContext.fetch(fetchDesc).first {
+                // Update existing
+                existing.name = accountDTO.name
+                existing.category = accountDTO.category
+                existing.type = accountDTO.type
+                existing.currency = accountDTO.currency ?? "INR"
+                existing.icon = accountDTO.icon
+                existing.parentID = accountDTO.parent_id
+                existing.metadata = metadataData
+            } else {
+                // Insert new
+                let newAccount = SDAccount(
+                    id: accountDTO.id,
+                    name: accountDTO.name,
+                    category: accountDTO.category,
+                    type: accountDTO.type,
+                    currency: accountDTO.currency ?? "INR",
+                    icon: accountDTO.icon,
+                    parentID: accountDTO.parent_id,
+                    metadata: metadataData
+                )
+                modelContext.insert(newAccount)
+            }
+        }
+        try modelContext.save()
+        print("[SyncActor] Upserted \(accounts.count) accounts")
+    }
+    
+    private func upsertUnits(_ units: [UnitDTO]) throws {
+        print("[SyncActor] Upserting \(units.count) units...")
+        
+        for unitDTO in units {
+            let fetchDesc = FetchDescriptor<SDUnit>(
+                predicate: #Predicate { $0.code == unitDTO.code }
+            )
+            
+            if let existing = try? modelContext.fetch(fetchDesc).first {
+                // Update existing
+                existing.name = unitDTO.name
+                existing.symbol = unitDTO.symbol
+                existing.type = unitDTO.type
+                existing.isSynced = true
+            } else {
+                // Insert new
+                let newUnit = SDUnit(
+                    code: unitDTO.code,
+                    name: unitDTO.name,
+                    symbol: unitDTO.symbol,
+                    type: unitDTO.type,
+                    isSynced: true
+                )
+                modelContext.insert(newUnit)
+            }
+        }
+        try modelContext.save()
+        print("[SyncActor] Upserted \(units.count) units")
+    }
+    
+    private func upsertTransactions(_ transactions: [TransactionDTO]) throws {
+        print("[SyncActor] Upserting \(transactions.count) transactions...")
+        
+        // Process in tiny batches with autoreleasepool
+        let batchSize = 10
+        var processed = 0
+        var inserted = 0
+        var skipped = 0
+        
+        for batch in transactions.chunked(into: batchSize) {
+            autoreleasepool {
+                // Fetch ALL tags fresh for this batch to avoid stale references
+                let allTagsDesc = FetchDescriptor<SDTag>()
+                let allTags = (try? modelContext.fetch(allTagsDesc)) ?? []
+                let tagsByID = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
+                
+                for txDTO in batch {
+                    // Check if transaction already exists (transactions are immutable)
+                    let txFetchDesc = FetchDescriptor<SDTransaction>(
+                        predicate: #Predicate { $0.id == txDTO.id }
+                    )
+                    
+                    if let existingTx = try? modelContext.fetch(txFetchDesc).first {
+                        // Transaction exists - skip (transactions are immutable in ledger)
+                        // Mark as synced if it wasn't
+                        if !existingTx.isSynced {
+                            existingTx.isSynced = true
+                        }
+                        skipped += 1
+                        continue
+                    }
+                    
+                    // Insert new transaction
+                    let tx = SDTransaction(
+                        id: txDTO.id,
+                        date: txDTO.date,
+                        desc: txDTO.description,
+                        note: txDTO.note,
+                        isSynced: true
+                    )
+                    modelContext.insert(tx)
+                    
+                    // Insert postings
+                    var postings: [SDPosting] = []
+                    for pDTO in txDTO.postings {
+                        // Link tags if present - use fresh tag instances from batch dictionary
+                        var linkedTags: [SDTag]? = nil
+                        if let tagDTOs = pDTO.tags, !tagDTOs.isEmpty {
+                            linkedTags = []
+                            for tagDTO in tagDTOs {
+                                let tagID = tagDTO.id.uuidString
+                                // Use pre-fetched tag from dictionary
+                                if let existingTag = tagsByID[tagID] {
+                                    linkedTags?.append(existingTag)
+                                } else {
+                                    // Fallback: create if not found (shouldn't happen if tags were synced first)
+                                    print("[SyncActor] WARNING: Tag \(tagID) not found in context, creating new one")
+                                    let newTag = SDTag(
+                                        id: tagID,
+                                        name: tagDTO.name,
+                                        desc: tagDTO.description,
+                                        color: tagDTO.color,
+                                        isSynced: true
+                                    )
+                                    modelContext.insert(newTag)
+                                    linkedTags?.append(newTag)
+                                }
+                            }
+                        }
 
-            let sdAccount = SDAccount(
-                id: account.id,
-                name: account.name,
-                category: account.category,
-                type: account.type,
-                currency: account.currency ?? "INR",  // Default to INR if not provided
-                icon: account.icon,
-                parentID: account.parent_id,
-                metadata: metadataData
-            )
-            modelContext.insert(sdAccount)
+                        let posting = SDPosting(
+                            id: pDTO.id,
+                            accountID: pDTO.account_id,
+                            amount: pDTO.amount,
+                            quantity: pDTO.quantity,
+                            unitCode: pDTO.unit_code,
+                            tags: linkedTags
+                        )
+                        posting.transaction = tx // Set relationship
+                        modelContext.insert(posting)
+                        postings.append(posting)
+                    }
+                    tx.postings = postings
+                    inserted += 1
+                }
+                
+                processed += batch.count
+                try? modelContext.save()
+                print("[SyncActor] Batch \(processed)/\(transactions.count): +\(inserted-skipped) new, ~\(skipped) existing")
+            }
         }
-        try modelContext.save()
+        print("[SyncActor] Upserted transactions: \(inserted) inserted, \(skipped) skipped (already exist)")
     }
     
-    private func insertUnits(_ units: [UnitDTO]) throws {
-       print("[SyncActor] Inserting \(units.count) units...")
-        for unit in units {
-            let sdUnit = SDUnit(
-                code: unit.code,
-                name: unit.name,
-                symbol: unit.symbol,
-                type: unit.type,
-                isSynced: true
-            )
-            modelContext.insert(sdUnit)
-        }
-        try modelContext.save()
-    }
-    
+    /// DEPRECATED: Replaced by upsertTransactions
     private func insertTransactions(_ transactions: [TransactionDTO]) throws {
         print("[SyncActor] Inserting \(transactions.count) transactions...")
         
@@ -459,6 +598,11 @@ actor SyncActor {
         
         for batch in transactions.chunked(into: batchSize) {
             autoreleasepool {
+                // Fetch ALL tags fresh for this batch to avoid stale references
+                let allTagsDesc = FetchDescriptor<SDTag>()
+                let allTags = (try? modelContext.fetch(allTagsDesc)) ?? []
+                let tagsByID = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
+                
                 for txDTO in batch {
                     let tx = SDTransaction(
                         id: txDTO.id,
@@ -472,25 +616,27 @@ actor SyncActor {
                     // Insert postings
                     var postings: [SDPosting] = []
                     for pDTO in txDTO.postings {
-                        // Link tags if present
+                        // Link tags if present - use fresh tag instances from batch dictionary
                         var linkedTags: [SDTag]? = nil
                         if let tagDTOs = pDTO.tags, !tagDTOs.isEmpty {
                             linkedTags = []
                             for tagDTO in tagDTOs {
                                 let tagID = tagDTO.id.uuidString
-                                let fetchDesc = FetchDescriptor<SDTag>(predicate: #Predicate { $0.id == tagID })
-                                if let existing = try? modelContext.fetch(fetchDesc).first {
-                                     linkedTags?.append(existing)
+                                // Use pre-fetched tag from dictionary
+                                if let existingTag = tagsByID[tagID] {
+                                    linkedTags?.append(existingTag)
                                 } else {
-                                     let newTag = SDTag(
+                                    // Fallback: create if not found (shouldn't happen if tags were synced first)
+                                    print("[SyncActor] WARNING: Tag \(tagID) not found in context, creating new one")
+                                    let newTag = SDTag(
                                         id: tagID,
                                         name: tagDTO.name,
                                         desc: tagDTO.description,
                                         color: tagDTO.color,
                                         isSynced: true
-                                     )
-                                     modelContext.insert(newTag)
-                                     linkedTags?.append(newTag)
+                                    )
+                                    modelContext.insert(newTag)
+                                    linkedTags?.append(newTag)
                                 }
                             }
                         }
