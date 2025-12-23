@@ -47,11 +47,12 @@ private struct TransactionListContent: View {
         if let accountID {
             if searchText.isEmpty {
                 predicate = #Predicate<SDTransaction> { t in
-                    (t.postings ?? []).contains { $0.accountID == accountID }
+                    // Use optional chaining + boolean check to handle optional relationship safely in Predicate
+                    t.postings?.contains { $0.accountID == accountID } == true
                 }
             } else {
                 predicate = #Predicate<SDTransaction> { t in
-                    (t.postings ?? []).contains { $0.accountID == accountID } &&
+                    (t.postings?.contains { $0.accountID == accountID } == true) &&
                     t.desc.localizedStandardContains(searchText)
                 }
             }
