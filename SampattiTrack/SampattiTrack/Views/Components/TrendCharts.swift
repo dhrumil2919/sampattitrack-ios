@@ -49,34 +49,40 @@ struct MoMExpenseTrendChart: View {
                     .frame(maxWidth: .infinity)
             } else {
                 Chart {
-                    // Bar marks for monthly expenses
+                    // Line chart for monthly expenses (Timeline based)
                     ForEach(Array(monthlyData.enumerated()), id: \.offset) { index, item in
-                        BarMark(
+                        LineMark(
                             x: .value("Month", item.month),
                             y: .value("Amount", item.amount)
                         )
-                        .foregroundStyle(
-                            item.amount > average ?
-                            Color.red.gradient :
-                            Color.green.gradient
-                        )
-                        .cornerRadius(4)
+                        .foregroundStyle(Color.red.gradient)
+                        .interpolationMethod(.catmullRom)
+                        .symbol(Circle())
+
+                        // MoM Change Label on the point
+                        if index > 0 {
+                            let prev = monthlyData[index - 1].amount
+                            let change = prev > 0 ? ((item.amount - prev) / prev) * 100 : 0
+
+                            AnnotationMark(
+                                x: .value("Month", item.month),
+                                y: .value("Amount", item.amount)
+                            ) {
+                                Text("\(change > 0 ? "+" : "")\(Int(change))%")
+                                    .font(.system(size: 8))
+                                    .foregroundColor(change > 0 ? .red : .green)
+                                    .padding(2)
+                                    .background(Color(.systemBackground).opacity(0.8))
+                                    .cornerRadius(2)
+                                    .offset(y: -15)
+                            }
+                        }
                     }
                     
                     // Average line
                     RuleMark(y: .value("Average", average))
                         .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
                         .foregroundStyle(.orange)
-                        .annotation(position: .top, alignment: .trailing) {
-                            Text("Avg: \(CurrencyFormatter.formatCheck(average))")
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                                .foregroundColor(.orange)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.1))
-                                .cornerRadius(4)
-                        }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
@@ -89,22 +95,6 @@ struct MoMExpenseTrendChart: View {
                     }
                 }
                 .frame(height: 180)
-            }
-            
-            // Legend
-            HStack(spacing: 16) {
-                HStack(spacing: 4) {
-                    Circle().fill(Color.green).frame(width: 8, height: 8)
-                    Text("Below Avg").font(.caption2).foregroundColor(.secondary)
-                }
-                HStack(spacing: 4) {
-                    Circle().fill(Color.red).frame(width: 8, height: 8)
-                    Text("Above Avg").font(.caption2).foregroundColor(.secondary)
-                }
-                HStack(spacing: 4) {
-                    Rectangle().fill(Color.orange).frame(width: 12, height: 2)
-                    Text("Average").font(.caption2).foregroundColor(.secondary)
-                }
             }
         }
         .padding()
@@ -315,11 +305,14 @@ struct IncomeVsExpensesChart: View {
 // MARK: - Savings Trend Chart
 @available(iOS 16.0, *)
 struct SavingsTrendChart: View {
-    let monthlyData: [(month: String, savings: Double)]
+    let monthlyData: [(month: String, rate: Double, absolute: Double)]
     
-    private var average: Double {
-        guard !monthlyData.isEmpty else { return 0 }
-        return monthlyData.reduce(0) { $0 + $1.savings } / Double(monthlyData.count)
+    private var trend: Double {
+        guard monthlyData.count >= 2 else { return 0 }
+        let current = monthlyData.last?.absolute ?? 0
+        let previous = monthlyData[monthlyData.count - 2].absolute
+        guard abs(previous) > 0 else { return 0 }
+        return ((current - previous) / abs(previous)) * 100
     }
     
     var body: some View {
@@ -331,12 +324,18 @@ struct SavingsTrendChart: View {
                     .font(.headline)
                 Spacer()
                 
-                if let latest = monthlyData.last {
-                    Text(CurrencyFormatter.formatCheck(latest.savings))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(latest.savings >= 0 ? .green : .red)
+                // MoM Change Badge
+                HStack(spacing: 4) {
+                    Image(systemName: trend >= 0 ? "arrow.up.right" : "arrow.down.right")
+                    Text("\(trend > 0 ? "+" : "")\(String(format: "%.1f", trend))%")
                 }
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(trend >= 0 ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                .foregroundColor(trend >= 0 ? .green : .red)
+                .cornerRadius(6)
             }
             
             if monthlyData.isEmpty {
@@ -347,26 +346,36 @@ struct SavingsTrendChart: View {
             } else {
                 Chart {
                     ForEach(Array(monthlyData.enumerated()), id: \.offset) { _, item in
+                        // Absolute Savings Bar
                         BarMark(
                             x: .value("Month", item.month),
-                            y: .value("Savings", item.savings)
+                            y: .value("Savings", item.absolute)
                         )
-                        .foregroundStyle(item.savings >= 0 ? Color.teal.gradient : Color.red.gradient)
+                        .foregroundStyle(item.absolute >= 0 ? Color.teal.opacity(0.5) : Color.red.opacity(0.5))
                         .cornerRadius(4)
+
+                        // Annotate with Rate %
+                        AnnotationMark(
+                            x: .value("Month", item.month),
+                            y: .value("Savings", item.absolute)
+                        ) {
+                            VStack(spacing: 2) {
+                                Text(String(format: "%.0f%%", item.rate))
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.primary)
+
+                                Text(CurrencyFormatter.formatCompact(item.absolute))
+                                    .font(.system(size: 8))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(4)
+                            .background(Color(.systemBackground).opacity(0.8))
+                            .cornerRadius(4)
+                            .shadow(radius: 1)
+                        }
                     }
                     
-                    // Average line
-                    RuleMark(y: .value("Average", average))
-                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
-                        .foregroundStyle(.purple)
-                        .annotation(position: average >= 0 ? .top : .bottom, alignment: .trailing) {
-                            Text("Avg: \(CurrencyFormatter.formatCheck(average))")
-                                .font(.caption2)
-                                .fontWeight(.medium)
-                                .foregroundColor(.purple)
-                        }
-                    
-                    // Zero line for reference
+                    // Zero line
                     RuleMark(y: .value("Zero", 0))
                         .lineStyle(StrokeStyle(lineWidth: 1))
                         .foregroundStyle(.gray.opacity(0.5))

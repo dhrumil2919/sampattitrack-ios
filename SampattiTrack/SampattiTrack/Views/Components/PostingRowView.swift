@@ -72,7 +72,7 @@ struct PostingRowView: View {
                 get: { posting.quantity },
                 set: { onQuantityChange($0) }
             ))
-            .keyboardType(.decimalPad)
+            .keyboardType(.numbersAndPunctuation)
             .textFieldStyle(RoundedBorderTextFieldStyle())
             .frame(width: 80)
             .accessibilityLabel("Quantity")

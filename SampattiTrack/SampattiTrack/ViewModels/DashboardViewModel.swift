@@ -37,6 +37,9 @@ class DashboardViewModel: ObservableObject {
     @Published var portfolioMetrics: AggregatePortfolioMetrics?
     @Published var netWorthHistory: [NetWorthDataPoint] = []
     @Published var monthlyTagSpending: [(month: String, tags: [(tag: String, amount: Double)])] = []
+    @Published var monthlyExpenses: [(month: String, amount: Double)] = []
+    @Published var monthlyIncome: [(month: String, amount: Double)] = []
+    @Published var monthlySavings: [(month: String, rate: Double, absolute: Double)] = []
     @Published var topTags: [TopTag] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -76,6 +79,12 @@ class DashboardViewModel: ObservableObject {
             let tags = calculator.calculateTagBreakdown(range: self.selectedRange)
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
             let recent = calculator.fetchRecentTransactions(limit: 5)
+
+            // Timeline charts always use YTD or longer range
+            let ytdRange = DateRange.ytd()
+            let mExpenses = calculator.calculateMonthlyExpenses(range: ytdRange)
+            let mIncome = calculator.calculateMonthlyIncome(range: ytdRange)
+            let mSavings = calculator.calculateMonthlySavingsRate(range: ytdRange)
 
             // Calculate aggregate portfolio metrics from all investment accounts
             let accountsDescriptor = FetchDescriptor<SDAccount>()
@@ -196,6 +205,9 @@ class DashboardViewModel: ObservableObject {
                 self.netWorthHistory = history
                 self.topTags = Array(tags.prefix(5))
                 self.monthlyTagSpending = spending
+                self.monthlyExpenses = mExpenses
+                self.monthlyIncome = mIncome
+                self.monthlySavings = mSavings
                 self.recentTransactions = recent
                 self.portfolioMetrics = aggregateMetrics
                 self.isLoading = false

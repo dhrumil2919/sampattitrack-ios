@@ -88,17 +88,14 @@ struct DashboardView: View {
                         //         }
                         // }
                         
-                        // TEMPORARILY DISABLED: New trend charts causing memory spike
-                        // TODO: Investigate SwiftUI Charts memory usage with tuple data
-                        /*
-                        // NEW: MoM Expense Trend Chart with Average Line
+                        // NEW: MoM Expense Trend Chart (Timeline based)
                         if !viewModel.monthlyExpenses.isEmpty {
                             if #available(iOS 16.0, *) {
                                 MoMExpenseTrendChart(monthlyData: viewModel.monthlyExpenses)
                             }
                         }
                         
-                        // NEW: Income Trend Chart with Average Line
+                        // NEW: Income Trend Chart
                         if !viewModel.monthlyIncome.isEmpty {
                             if #available(iOS 16.0, *) {
                                 IncomeTrendChart(monthlyData: viewModel.monthlyIncome)
@@ -121,7 +118,6 @@ struct DashboardView: View {
                                 SavingsTrendChart(monthlyData: viewModel.monthlySavings)
                             }
                         }
-                        */
                         
                         // Expense Pie Chart
                         if !viewModel.topTags.isEmpty {
