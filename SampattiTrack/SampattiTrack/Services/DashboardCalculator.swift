@@ -112,6 +112,7 @@ class DashboardCalculator {
         // Filter for the selected range
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: range.start)
         let endStr = formatter.string(from: range.end)
         
@@ -185,6 +186,7 @@ class DashboardCalculator {
         let calendar = Calendar.current
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
 
         // Define "Current" as Last 30 Days
         guard let startCurrent = calendar.date(byAdding: .day, value: -30, to: now),
@@ -238,6 +240,7 @@ class DashboardCalculator {
         let start = range.start
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: start)
         let endStr = formatter.string(from: range.end)
 
@@ -383,6 +386,7 @@ class DashboardCalculator {
         let allTransactions = getCachedTransactions()
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: range.start)
         let endStr = formatter.string(from: range.end)
         
@@ -404,6 +408,7 @@ class DashboardCalculator {
         let allTransactions = getCachedTransactions()
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: range.start)
         let endStr = formatter.string(from: range.end)
         
@@ -479,6 +484,7 @@ class DashboardCalculator {
         // Assuming dates are strictly ISO8601 YYYY-MM-DD
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: range.start)
         let endStr = formatter.string(from: range.end)
 
@@ -597,6 +603,7 @@ class DashboardCalculator {
     private func calculateNetWorthHistoryCached(allTransactions: [SDTransaction], range: DateRange) -> [NetWorthDataPoint] {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
         let startStr = formatter.string(from: range.start)
         let endStr = formatter.string(from: range.end)
 
