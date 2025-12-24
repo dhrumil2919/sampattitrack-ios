@@ -297,6 +297,13 @@ actor SyncActor {
         let portfolio = try await fetchPortfolioAnalysis()
         let netWorthHistory = try await fetchNetWorthHistory()
         
+        // Fetch tax and capital gains data
+        let taxAnalysis = try await fetchTaxAnalysis()
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let capitalGains = try await fetchCapitalGains(year: currentYear)
+        let cashFlow = try await fetchCashFlow()
+        let portfolioAnalysis = try await fetchPortfolioAssets()
+        
         print("[SyncActor] Upserting data (incremental sync)...")
         // Use upsert instead of delete-all to prevent data invalidation
         try upsertTags(tags)
@@ -306,6 +313,12 @@ actor SyncActor {
         try upsertPortfolioXIRR(portfolio)
         try cacheNetWorthHistory(netWorthHistory)
         try upsertTransactions(transactions)
+        
+        // Cache tax and capital gains data
+        try cacheTaxData(taxAnalysis)
+        try cacheCapitalGains(capitalGains)
+        try cacheCashFlow(cashFlow)
+        try cachePortfolioAnalysis(portfolioAnalysis)
         
         print("[SyncActor] Pull complete")
     }
@@ -769,6 +782,109 @@ actor SyncActor {
         UserDefaults.standard.set(latest.liabilities, forKey: "cached_liabilities")
         UserDefaults.standard.set(latest.date, forKey: "cached_net_worth_date")
     }
+    
+    // MARK: - Tax Analysis
+    
+    nonisolated private func fetchTaxAnalysis() async throws -> TaxAnalysis {
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/tax", method: "GET") { (result: Result<TaxAnalysisResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    print("[SyncActor] Failed to fetch tax analysis: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func cacheTaxData(_ data: TaxAnalysis) throws {
+        print("[SyncActor] Caching tax analysis data...")
+        
+        // Encode and store in UserDefaults
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: "cached_tax_analysis")
+            print("[SyncActor] Cached tax analysis: Total Tax = \(data.totalTax), Rate = \(data.taxRate)%")
+        }
+    }
+    
+    // MARK: - Capital Gains
+    
+    nonisolated private func fetchCapitalGains(year: Int) async throws -> CapitalGainsReport {
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/tax/gains?year=\(year)", method: "GET") { (result: Result<CapitalGainsResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    print("[SyncActor] Failed to fetch capital gains: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func cacheCapitalGains(_ data: CapitalGainsReport) throws {
+        print("[SyncActor] Caching capital gains data for year \(data.year)...")
+        
+        // Encode and store in UserDefaults
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: "cached_capital_gains")
+            print("[SyncActor] Cached capital gains: STCG = \(data.totalSTCG), LTCG = \(data.totalLTCG), Total Tax = \(data.totalTax)")
+        }
+    }
+    
+    // MARK: - Cash Flow
+    
+    nonisolated private func fetchCashFlow() async throws -> [CashFlowDataPoint] {
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/cash-flow?interval=monthly", method: "GET") { (result: Result<CashFlowResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    print("[SyncActor] Failed to fetch cash flow: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    private func cacheCashFlow(_ data: [CashFlowDataPoint]) throws {
+        print("[SyncActor] Caching cash flow data (\(data.count) months)...")
+        
+        // Encode and store in UserDefaults
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: "cached_cash_flow")
+            print("[SyncActor] Cached \(data.count) cash flow data points")
+        }
+    }
+    
+    nonisolated private func fetchPortfolioAssets() async throws -> [AssetPerformance] {
+        print("[SyncActor] Fetching portfolio analysis...")
+        return try await withCheckedThrowingContinuation { continuation in
+            APIClient.shared.request("/analysis/portfolio", method: "GET") { (result: Result<PortfolioAnalysisResponse, APIClient.APIError>) in
+                switch result {
+                case .success(let response):
+                    print("[SyncActor] Fetched \(response.data.count) portfolio assets")
+                    continuation.resume(returning: response.data)
+                case .failure(let error):
+                    print("[SyncActor] Failed to fetch portfolio assets: \(error)")
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+    
+    nonisolated private func cachePortfolioAnalysis(_ data: [AssetPerformance]) throws {
+        // Encode and store in UserDefaults
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: "cached_portfolio_analysis")
+            print("[SyncActor] Cached \(data.count) portfolio assets")
+        }
+    }
+
 }
 
 // MARK: - Array Extension

@@ -44,6 +44,13 @@ class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     
+    // Tax and Capital Gains data
+    @Published var taxAnalysis: TaxAnalysis?
+    @Published var capitalGains: CapitalGainsReport?
+    @Published var cashFlowData: [CashFlowDataPoint] = []
+    @Published var portfolioAssets: [AssetPerformance] = []
+    
+    
     @Published var selectedRange: DateRange = .lastMonth() {
         didSet {
             calculateClientSideData()
@@ -74,7 +81,80 @@ class DashboardViewModel: ObservableObject {
 
             let calculator = DashboardCalculator(modelContext: context)
 
+            // Load cached cash flow data first
+            var cashFlow: [CashFlowDataPoint] = []
+            if let cfData = UserDefaults.standard.data(forKey: "cached_cash_flow"),
+               let cf = try? JSONDecoder().decode([CashFlowDataPoint].self, from: cfData) {
+                cashFlow = cf
+            }
+            
+            // Load cached portfolio assets locally to avoid closure capture issues
+            var localPortfolioAssets: [AssetPerformance] = []
+            if let pData = UserDefaults.standard.data(forKey: "cached_portfolio_analysis"),
+               let pAssets = try? JSONDecoder().decode([AssetPerformance].self, from: pData) {
+                localPortfolioAssets = pAssets
+            }
+            
+            // Calculate income/expense/savings from cash flow API data based on selectedRange
+            let now = Date()
+            let calendar = Calendar.current
+            
+            // Use selectedRange start and end dates directly
+            let rangeStart = self.selectedRange.start
+            let rangeEnd = self.selectedRange.end
+            
+            // Filter cash flow data based on selected range
+            var filteredIncome: Double = 0
+            var filteredExpenses: Double = 0
+            var filteredSavings: Double = 0
+            var monthCount = 0
+            
+            for dataPoint in cashFlow {
+                guard let date = dataPoint.date else { continue }
+                
+                if date >= rangeStart && date <= rangeEnd {
+                    filteredIncome += dataPoint.incomeValue
+                    filteredExpenses += dataPoint.expenseValue
+                    filteredSavings += dataPoint.netSavingsValue
+                    monthCount += 1
+                }
+            }
+            
+            // Calculate savings rate for the selected range
+            let savingsRate = filteredIncome > 0 ? ((filteredIncome - filteredExpenses) / filteredIncome) * 100 : 0
+            
+            // Calculate MoM expense growth (compare last two months in cash flow)
+            var expenseGrowth: Double = 0
+            if cashFlow.count >= 2 {
+                let sortedCashFlow = cashFlow.sorted { ($0.date ?? Date.distantPast) < ($1.date ?? Date.distantPast) }
+                if let lastMonth = sortedCashFlow.suffix(2).first,
+                   let currentMonth = sortedCashFlow.last {
+                    let lastExpense = lastMonth.expenseValue
+                    let currentExpense = currentMonth.expenseValue
+                    if lastExpense > 0 {
+                        expenseGrowth = ((currentExpense - lastExpense) / lastExpense) * 100
+                    }
+                }
+            }
+            
+            // Calculate Financial KPIs from cash flow data
+            
+            // 1. Cash Flow Ratio = Income / Expenses
+            let cashFlowRatio = filteredExpenses > 0 ? filteredIncome / filteredExpenses : 0
+            
+            // 2. Monthly Burn Rate = Average monthly expenses
+            let monthlyBurnRate = monthCount > 0 ? filteredExpenses / Double(monthCount) : 0
+            
+            // 3. Runway Days - need current liquid assets
+            // Get assets from summaryData (still use calculator for balance sheet items)
             let summaryData = calculator.calculateSummary(range: self.selectedRange)
+            let liquidAssets = Double(summaryData.totalAssets) ?? 0
+            let runwayDays = monthlyBurnRate > 0 ? Int((liquidAssets / monthlyBurnRate) * 30) : 999999
+            
+            // 4. Debt to Asset Ratio - from balance sheet
+            let totalLiabilities = Double(summaryData.totalLiabilities) ?? 0
+            let debtToAssetRatio = liquidAssets > 0 ? (abs(totalLiabilities) / liquidAssets) * 100 : 0
+            
             let history = calculator.calculateNetWorthHistory(range: self.selectedRange)
             let tags = calculator.calculateTagBreakdown(range: self.selectedRange)
             let spending = calculator.calculateMonthlySpending(range: self.selectedRange)
@@ -95,7 +175,6 @@ class DashboardViewModel: ObservableObject {
             var totalWeight: Double = 0
             
             // Temporary storage for group aggregation
-            // Key: GroupID, Value: (Invested, Current, AbsoluteReturn, WeightedXIRR_Accumulator, Invested_Accumulator_For_XIRR)
             var groupAggregates: [String: (invested: Double, current: Double, absReturn: Double, xirrWeighted: Double, xirrWeight: Double)] = [:]
 
             for account in allAccounts.filter({ $0.type == "Investment" }) {
@@ -120,7 +199,7 @@ class DashboardViewModel: ObservableObject {
                 totalWeightedXIRR += xirr * invested
                 totalWeight += invested
 
-                // --- Grouping Logic ---
+                // Grouping Logic
                 let groupID: String
                 if account.id == "Assets:Gold" {
                     groupID = account.id
@@ -152,7 +231,6 @@ class DashboardViewModel: ObservableObject {
                 if let groupAccount = allAccounts.first(where: { $0.id == groupID }) {
                     groupName = groupAccount.name
                 } else {
-                    // Fallback to last segment of ID
                     groupName = groupID.split(separator: ":").last.map(String.init) ?? groupID
                 }
 
@@ -170,37 +248,53 @@ class DashboardViewModel: ObservableObject {
             // Sort groups by current value descending
             aggregateMetrics.groups = groups.sorted(by: { $0.totalCurrentValue > $1.totalCurrentValue })
 
-            await MainActor.run {
-                // Use API-cached net worth if available (matches web frontend approach)
+            await MainActor.run { [localPortfolioAssets] in
+                // Use API-cached net worth if available
                 let cachedNetWorth = UserDefaults.standard.string(forKey: "cached_net_worth")
                 
+                // Create summary with cash flow API data
                 if let apiNetWorth = cachedNetWorth {
-                    // Override with API value (web uses net worth history API)
                     self.summary = ClientDashboardData(
                         netWorth: apiNetWorth,
-                        lastMonthIncome: summaryData.lastMonthIncome,
-                        lastMonthExpenses: summaryData.lastMonthExpenses,
-                        yearlyIncome: summaryData.yearlyIncome,
-                        yearlyExpenses: summaryData.yearlyExpenses,
+                        lastMonthIncome: String(filteredIncome),
+                        lastMonthExpenses: String(filteredExpenses),
+                        yearlyIncome: String(filteredIncome),
+                        yearlyExpenses: String(filteredExpenses),
                         totalAssets: summaryData.totalAssets,
                         totalLiabilities: summaryData.totalLiabilities,
-                        savingsRate: summaryData.savingsRate,
-                        yearlySavings: summaryData.yearlySavings,
+                        savingsRate: savingsRate,
+                        yearlySavings: String(filteredSavings),
                         averageGrowthRate: summaryData.averageGrowthRate,
                         netWorthGrowth: summaryData.netWorthGrowth,
-                        expenseGrowth: summaryData.expenseGrowth,
+                        expenseGrowth: expenseGrowth,
                         savingsRateChange: summaryData.savingsRateChange,
-                        cashFlowRatio: summaryData.cashFlowRatio,
-                        monthlyBurnRate: summaryData.monthlyBurnRate,
-                        runwayDays: summaryData.runwayDays,
-                        debtToAssetRatio: summaryData.debtToAssetRatio
+                        cashFlowRatio: cashFlowRatio,
+                        monthlyBurnRate: monthlyBurnRate,
+                        runwayDays: runwayDays,
+                        debtToAssetRatio: debtToAssetRatio
                     )
-                    print("[Dashboard] Using API-cached net worth: \(apiNetWorth)")
+                    print("[Dashboard] Using filter:\(self.selectedRange) Income=\(filteredIncome), Expenses=\(filteredExpenses), CashFlowRatio=\(cashFlowRatio), BurnRate=\(monthlyBurnRate), Runway=\(runwayDays)days")
                 } else {
-                    // Fallback to calculated value if API hasn't synced yet
+                    // Fallback to calculated values
                     self.summary = summaryData
-                    print("[Dashboard] Using locally calculated net worth: \(summaryData.netWorth)")
                 }
+                
+                // Load cached tax analysis
+                if let taxData = UserDefaults.standard.data(forKey: "cached_tax_analysis"),
+                   let tax = try? JSONDecoder().decode(TaxAnalysis.self, from: taxData) {
+                    self.taxAnalysis = tax
+                    print("[Dashboard] Loaded cached tax analysis: Rate = \(tax.taxRate)%")
+                }
+                
+                // Load cached capital gains
+                if let cgData = UserDefaults.standard.data(forKey: "cached_capital_gains"),
+                   let cg = try? JSONDecoder().decode(CapitalGainsReport.self, from: cgData) {
+                    self.capitalGains = cg
+                    print("[Dashboard] Loaded cached capital gains for year \(cg.year)")
+                }
+                
+                // Store cash flow data
+                self.cashFlowData = cashFlow
                 
                 self.netWorthHistory = history
                 self.topTags = Array(tags.prefix(5))
@@ -210,8 +304,9 @@ class DashboardViewModel: ObservableObject {
                 self.monthlySavings = mSavings
                 self.recentTransactions = recent
                 self.portfolioMetrics = aggregateMetrics
+                self.portfolioAssets = localPortfolioAssets
                 self.isLoading = false
-            }
-        }
+            } // MainActor.run
+        } // Task.detached
     }
 }

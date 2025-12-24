@@ -69,6 +69,30 @@ struct AssetPerformance: Codable, Identifiable {
     var investedAmountValue: Double {
         return Double(investedAmount) ?? 0.0
     }
+    
+    // Hierarchical navigation helpers
+    var accountPath: [String] {
+        accountID.split(separator: ":").map(String.init)
+    }
+    
+    var parentAccountID: String? {
+        let components = accountPath
+        guard components.count > 1 else { return nil }
+        return components.dropLast().joined(separator: ":")
+    }
+    
+    var depth: Int {
+        accountPath.count
+    }
+    
+    var returnValue: Double {
+        Double(absoluteReturn) ?? 0
+   }
+    
+    var returnPercentage: Double {
+        guard investedAmountValue > 0 else { return 0 }
+        return (returnValue / investedAmountValue) * 100
+    }
 }
 
 struct NetWorthHistoryResponse: Codable {

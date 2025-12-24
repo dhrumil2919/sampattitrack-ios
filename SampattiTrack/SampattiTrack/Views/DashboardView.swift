@@ -4,15 +4,13 @@ import SwiftData
 struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
     @Environment(\.modelContext) private var modelContext
-
-    // Navigation States
-    @State private var showingTagsView = false
+    
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Time Range Picker
+                    // Time Range Picker - PRESERVED
                     TimeRangePicker(selection: $viewModel.selectedRange)
                         .padding(.horizontal, -16) // Edge-to-edge
 
@@ -21,55 +19,133 @@ struct DashboardView: View {
                             .padding(.top, 100)
                     } else if let summary = viewModel.summary {
                         
-                        // Net Worth Hero Card
-                        NetWorthCard(netWorth: summary.netWorth, growth: summary.netWorthGrowth)
-                            .onTapGesture {
-                                // Visualization removed
-                            }
+                        // Net Worth Hero Card with Navigation
+                        NavigationLink(destination: NetWorthGrowthView(
+                            netWorthHistory: viewModel.netWorthHistory,
+                            currentNetWorth: summary.netWorth,
+                            growth: summary.netWorthGrowth
+                        )) {
+                            NetWorthCard(netWorth: summary.netWorth, growth: summary.netWorthGrowth)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                         
                         // Quick Stats Grid
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                            StatCard(
-                                icon: "arrow.up.circle.fill",
-                                title: "Income",
-                                value: CurrencyFormatter.format(summary.lastMonthIncome),
-                                subtitle: "Avg Growth: \(String(format: "%.1f", summary.averageGrowthRate))%",
+                            NavigationLink(destination: MOMDetailView(
+                                title: "Income Trend",
+                                data: viewModel.prepareMOMData(from: viewModel.cashFlowData) { $0.incomeValue },
+                                valueFormatter: { CurrencyFormatter.format(String($0)) },
                                 color: .green
-                            )
+                            )) {
+                                StatCard(
+                                    icon: "arrow.up.circle.fill",
+                                    title: "Income",
+                                    value: CurrencyFormatter.format(summary.lastMonthIncome),
+                                    subtitle: "Avg Growth: \(String(format: "%.1f", summary.averageGrowthRate))%",
+                                    color: .green
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
-                            StatCard(
-                                icon: "arrow.down.circle.fill",
-                                title: "Expenses",
-                                value: CurrencyFormatter.format(summary.lastMonthExpenses),
-                                subtitle: "MoM: \(summary.expenseGrowth > 0 ? "+" : "")\(String(format: "%.1f", summary.expenseGrowth))%",
+                            NavigationLink(destination: MOMDetailView(
+                                title: "Expense Trend",
+                                data: viewModel.prepareMOMData(from: viewModel.cashFlowData) { $0.expenseValue },
+                                valueFormatter: { CurrencyFormatter.format(String($0)) },
                                 color: .red
-                            )
+                            )) {
+                                StatCard(
+                                    icon: "arrow.down.circle.fill",
+                                    title: "Expenses",
+                                    value: CurrencyFormatter.format(summary.lastMonthExpenses),
+                                    subtitle: "MoM: \(summary.expenseGrowth > 0 ? "+" : "")\(String(format: "%.1f", summary.expenseGrowth))%",
+                                    color: .red
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
-                            StatCard(
-                                icon: "banknote.fill",
-                                title: "Assets",
-                                value: CurrencyFormatter.format(summary.totalAssets),
-                                subtitle: nil,
-                                color: .blue
-                            )
+                            NavigationLink(destination: HierarchicalAssetsView(
+                                assets: viewModel.portfolioAssets,
+                                totalAssets: summary.totalAssets,
+                                totalLiabilities: summary.totalLiabilities,
+                                parentPath: "Assets"  // Start from children of Assets
+                            )) {
+                                StatCard(
+                                    icon: "banknote.fill",
+                                    title: "Assets",
+                                    value: CurrencyFormatter.format(summary.totalAssets),
+                                    subtitle: nil,
+                                    color: .blue
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
                             
                             StatCard(
                                 icon: "creditcard.fill",
                                 title: "Liabilities",
-                                value: CurrencyFormatter.formatInverted(summary.totalLiabilities),
+                                value: CurrencyFormatter.format(summary.totalLiabilities),
                                 subtitle: nil,
-                                color: .orange
+                                color: .red
                             )
+                            
+                            // Checking Accounts Card - shows individual bank accounts
+                            NavigationLink(destination: AccountsListView(
+                                title: "Checking Accounts",
+                                accounts: viewModel.portfolioAssets.filter { 
+                                    $0.accountID.hasPrefix("Assets:Checking:") && 
+                                    $0.accountID.components(separatedBy: ":").count == 3  // Direct children only
+                                }
+                            )) {
+                                let checkingTotal = viewModel.portfolioAssets
+                                    .filter { $0.accountID.hasPrefix("Assets:Checking:") }
+                                    .reduce(0) { $0 + $1.currentValueValue }
+                                StatCard(
+                                    icon: "building.columns.fill",
+                                    title: "Checking",
+                                    value: CurrencyFormatter.format(String(checkingTotal)),
+                                    subtitle: nil,
+                                    color: .purple
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            
+                            // Wallet Accounts Card
+                            NavigationLink(destination: AccountsListView(
+                                title: "Wallet Accounts",
+                                accounts: viewModel.portfolioAssets.filter { 
+                                    $0.accountID.hasPrefix("Assets:Wallet:") && 
+                                    $0.accountID.components(separatedBy: ":").count == 3
+                                }
+                            )) {
+                                let walletTotal = viewModel.portfolioAssets
+                                    .filter { $0.accountID.hasPrefix("Assets:Wallet:") }
+                                    .reduce(0) { $0 + $1.currentValueValue }
+                                StatCard(
+                                    icon: "wallet.pass.fill",
+                                    title: "Wallet",
+                                    value: CurrencyFormatter.format(String(walletTotal)),
+                                    subtitle: nil,
+                                    color: .orange
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // Savings Rate Card
-                        SavingsRateCard(
-                            rate: summary.savingsRate,
-                            saved: summary.yearlySavings,
-                            change: summary.savingsRateChange
-                        )
+                        // Savings Rate Card with Navigation
+                        NavigationLink(destination: MOMDetailView(
+                            title: "Savings Trend",
+                            data: viewModel.prepareMOMData(from: viewModel.cashFlowData) { $0.netSavingsValue },
+                            valueFormatter: { CurrencyFormatter.format(String($0)) },
+                            color: .blue
+                        )) {
+                            SavingsRateCard(
+                                rate: summary.savingsRate,
+                                saved: summary.yearlySavings,
+                                change: summary.savingsRateChange
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
                         
-                        // NEW: KPI Metrics Grid
+                        // KPI Metrics Grid
                         KPIGridView(
                             cashFlowRatio: summary.cashFlowRatio,
                             income: Double(summary.lastMonthIncome) ?? 0,
@@ -80,66 +156,41 @@ struct DashboardView: View {
                             debtToAssetRatio: summary.debtToAssetRatio
                         )
                         
-                        // Net Worth Trend (Chart component removed)
-                        // if !viewModel.netWorthHistory.isEmpty {
-                        //     NetWorthChart(data: viewModel.netWorthHistory)
-                        //         .onTapGesture {
-                        //             // Visualization removed
-                        //         }
-                        // }
-                        
-                        // NEW: MoM Expense Trend Chart (Timeline based)
-                        if !viewModel.monthlyExpenses.isEmpty {
-                            if #available(iOS 16.0, *) {
-                                MoMExpenseTrendChart(monthlyData: viewModel.monthlyExpenses)
+                        // Tax Information Cards with Navigation
+                        if let taxAnalysis = viewModel.taxAnalysis {
+                            NavigationLink(destination: TaxDetailView(taxAnalysis: taxAnalysis)) {
+                                TaxCard(taxAnalysis: taxAnalysis)
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // NEW: Income Trend Chart
-                        if !viewModel.monthlyIncome.isEmpty {
-                            if #available(iOS 16.0, *) {
-                                IncomeTrendChart(monthlyData: viewModel.monthlyIncome)
+                        if let capitalGains = viewModel.capitalGains {
+                            NavigationLink(destination: CapitalGainsDetailView(capitalGains: capitalGains)) {
+                                CapitalGainsCard(capitalGains: capitalGains)
                             }
+                            .buttonStyle(PlainButtonStyle())
                         }
                         
-                        // NEW: Income vs Expenses Comparison
-                        if !viewModel.monthlyIncome.isEmpty || !viewModel.monthlyExpenses.isEmpty {
-                            if #available(iOS 16.0, *) {
-                                IncomeVsExpensesChart(
-                                    monthlyIncome: viewModel.monthlyIncome,
-                                    monthlyExpenses: viewModel.monthlyExpenses
-                                )
+                        // Portfolio KPI Grid with Hierarchical Navigation (Investment accounts only)
+                        if let portfolio = viewModel.portfolioMetrics, !viewModel.portfolioAssets.isEmpty {
+                            NavigationLink(destination: HierarchicalPortfolioView(
+                                assets: viewModel.portfolioAssets,
+                                parentPath: "Assets"  // Start from children: Equity, Gold, NPS, etc.
+                            )) {
+                                PortfolioSummaryCard(metrics: portfolio)
                             }
+                            .buttonStyle(PlainButtonStyle())
+                        } else if let portfolio = viewModel.portfolioMetrics {
+                            PortfolioSummaryCard(metrics: portfolio)
                         }
                         
-                        // NEW: Savings Trend Chart
-                        if !viewModel.monthlySavings.isEmpty {
-                            if #available(iOS 16.0, *) {
-                                SavingsTrendChart(monthlyData: viewModel.monthlySavings)
-                            }
-                        }
-                        
-                        // Expense Pie Chart
-                        if !viewModel.topTags.isEmpty {
-                            if #available(iOS 17.0, *) {
-                                DashboardCharts.ExpensePieChart(data: viewModel.topTags)
-                                    .onTapGesture {
-                                        showingTagsView = true
-                                    }
-                            }
-                        }
-                        
-                        // Tag Spending Stacked Bar
-                        if !viewModel.monthlyTagSpending.isEmpty {
-                            if #available(iOS 16.0, *) {
-                                DashboardCharts.TagSpendingChart(data: viewModel.monthlyTagSpending)
-                            }
-                        }
-                        
-                        // Portfolio KPI Grid  
-                        if let portfolio = viewModel.portfolioMetrics {
-                            PortfolioKPIGrid(metrics: portfolio)
-                        }
+                        // REMOVED: All chart components
+                        // - MoMExpenseTrendChart
+                        // - IncomeTrendChart
+                        // - IncomeVsExpensesChart
+                        // - SavingsTrendChart
+                        // - ExpensePieChart
+                        // - TagSpendingChart
                         
                         // Recent Transactions
                         if !viewModel.recentTransactions.isEmpty {
@@ -147,11 +198,6 @@ struct DashboardView: View {
                                 transactions: viewModel.recentTransactions
                             )
                         }
-                        
-                        // Hidden Links
-                        NavigationLink(isActive: $showingTagsView) {
-                            TagListView()
-                        } label: { EmptyView() }
 
                     } else if let error = viewModel.errorMessage {
                         VStack(spacing: 16) {
@@ -482,3 +528,166 @@ struct RecentTransactionsSection: View {
         .shadow(color: .black.opacity(0.05), radius: 5)
     }
 }
+
+// MARK: - Tax Card
+struct TaxCard: View {
+    let taxAnalysis: TaxAnalysis
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "doc.text.fill")
+                    .foregroundColor(.purple)
+                Text("Income Tax (Current FY)")
+                    .font(.headline)
+            }
+            
+            HStack(spacing: 12) {
+                VStack(alignment: .leading) {
+                    Text("Total Tax Paid")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(CurrencyFormatter.format(taxAnalysis.totalTax))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing) {
+                    Text("Effective Rate")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.2f%%", taxAnalysis.taxRate))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
+                }
+            }
+            
+            if !taxAnalysis.breakdown.isEmpty,let latest = taxAnalysis.breakdown.last {
+                Divider()
+                Text("FY \(latest.year-1)-\(latest.year % 100): ₹\(CurrencyFormatter.format(latest.taxPaid)) on ₹\(CurrencyFormatter.format(latest.income))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Capital Gains Card
+struct CapitalGainsCard: View {
+    let capitalGains: CapitalGainsReport
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundColor(.orange)
+                Text("Capital Gains (FY \(capitalGains.year-1)-\(capitalGains.year % 100))")
+                    .font(.headline)
+            }
+            
+            // STCG and LTCG Row
+            HStack(spacing: 12) {
+                VStack(alignment: .leading) {
+                    Text("STCG")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(CurrencyFormatter.format(capitalGains.totalSTCG))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(capitalGains.totalSTCGValue >= 0 ? .green : .red)
+                }
+                
+                VStack(alignment: .leading) {
+                    Text("LTCG")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(CurrencyFormatter.format(capitalGains.totalLTCG))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(capitalGains.totalLTCGValue >= 0 ? .green : .red)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing) {
+                    Text("Total Tax")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(CurrencyFormatter.format(capitalGains.totalTax))
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - Portfolio Summary Card (Simplified)
+struct PortfolioSummaryCard: View {
+    let metrics: AggregatePortfolioMetrics
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundColor(.purple)
+                Text("Portfolio")
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            // Row 1: Invested & Current Value
+            HStack(spacing: 12) {
+                KPICard(
+                    title: "Invested",
+                    value: CurrencyFormatter.format(String(metrics.totalInvested)),
+                    color: .blue,
+                    subtitle: nil
+                )
+                KPICard(
+                    title: "Current",
+                    value: CurrencyFormatter.format(String(metrics.totalCurrentValue)),
+                    color: .cyan,
+                    subtitle: nil
+                )
+            }
+            
+            // Row 2: Return & XIRR
+            HStack(spacing: 12) {
+                KPICard(
+                    title: "Return",
+                    value: CurrencyFormatter.format(String(metrics.totalAbsoluteReturn)),
+                    color: metrics.totalAbsoluteReturn >= 0 ? .green : .red,
+                    subtitle: String(format: "%.2f%%", metrics.returnPercentage)
+                )
+                KPICard(
+                    title: "XIRR",
+                    value: String(format: "%.2f%%", metrics.weightedXIRR),
+                    color: metrics.weightedXIRR >= 0 ? .green : .red,
+                    subtitle: "Annualized"
+                )
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
