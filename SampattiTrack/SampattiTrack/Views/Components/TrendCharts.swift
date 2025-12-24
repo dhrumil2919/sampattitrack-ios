@@ -58,25 +58,6 @@ struct MoMExpenseTrendChart: View {
                         .foregroundStyle(Color.red.gradient)
                         .interpolationMethod(.catmullRom)
                         .symbol(Circle())
-
-                        // MoM Change Label on the point
-                        if index > 0 {
-                            let prev = monthlyData[index - 1].amount
-                            let change = prev > 0 ? ((item.amount - prev) / prev) * 100 : 0
-
-                            AnnotationMark(
-                                x: .value("Month", item.month),
-                                y: .value("Amount", item.amount)
-                            ) {
-                                Text("\(change > 0 ? "+" : "")\(Int(change))%")
-                                    .font(.system(size: 8))
-                                    .foregroundColor(change > 0 ? .red : .green)
-                                    .padding(2)
-                                    .background(Color(.systemBackground).opacity(0.8))
-                                    .cornerRadius(2)
-                                    .offset(y: -15)
-                            }
-                        }
                     }
                     
                     // Average line
@@ -353,26 +334,6 @@ struct SavingsTrendChart: View {
                         )
                         .foregroundStyle(item.absolute >= 0 ? Color.teal.opacity(0.5) : Color.red.opacity(0.5))
                         .cornerRadius(4)
-
-                        // Annotate with Rate %
-                        AnnotationMark(
-                            x: .value("Month", item.month),
-                            y: .value("Savings", item.absolute)
-                        ) {
-                            VStack(spacing: 2) {
-                                Text(String(format: "%.0f%%", item.rate))
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.primary)
-
-                                Text(CurrencyFormatter.formatCompact(item.absolute))
-                                    .font(.system(size: 8))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(4)
-                            .background(Color(.systemBackground).opacity(0.8))
-                            .cornerRadius(4)
-                            .shadow(radius: 1)
-                        }
                     }
                     
                     // Zero line
