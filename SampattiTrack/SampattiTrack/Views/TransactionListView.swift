@@ -38,9 +38,11 @@ private struct TransactionListContent: View {
 
     @Query private var transactions: [SDTransaction]
     let accountID: String?
+    let searchText: String
 
     init(accountID: String?, searchText: String) {
         self.accountID = accountID
+        self.searchText = searchText
 
         let predicate: Predicate<SDTransaction>
         
@@ -72,15 +74,22 @@ private struct TransactionListContent: View {
     var body: some View {
         Group {
             if transactions.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 50))
-                        .foregroundColor(.secondary)
-                    Text("No transactions found")
-                        .foregroundColor(.secondary)
-                     Button("Sync Now") {
-                        Task {
-                            await syncManager.syncAll()
+                if !searchText.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                } else {
+                    ContentUnavailableView {
+                        Label("No Transactions", systemImage: "tray")
+                    } description: {
+                        if accountID != nil {
+                            Text("This account has no transactions yet.")
+                        } else {
+                            Text("Get started by creating your first transaction.")
+                        }
+                    } actions: {
+                        Button("Sync Now") {
+                            Task {
+                                await syncManager.syncAll()
+                            }
                         }
                     }
                 }
