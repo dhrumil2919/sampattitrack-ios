@@ -30,7 +30,9 @@ class LoginViewModel: ObservableObject {
                         self.errorMessage = response.error?.message ?? "Login failed"
                     }
                 case .failure(let error):
-                    self.errorMessage = "Network error: \(error)"
+                    // Sentinel: Log actual error for debugging but show generic message to user to avoid leaking sensitive info
+                    print("[LoginViewModel] Login failed with error: \(error)")
+                    self.errorMessage = "Unable to connect to server. Please check your internet connection or API configuration."
                 }
             }
         }
