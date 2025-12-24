@@ -77,7 +77,7 @@ struct AccountDetailView: View {
                         HStack(spacing: 12) {
                             KPICard(
                                 title: "Current Balance",
-                                value: CurrencyFormatter.format(String(currentBalance)),
+                                value: CurrencyFormatter.format(String(invested + absReturn)),
                                 color: .blue,
                                 subtitle: nil
                             )

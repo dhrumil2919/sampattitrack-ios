@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-class APIClient: ObservableObject {
+final class APIClient: ObservableObject, @unchecked Sendable {
     static let shared = APIClient()
     
     @Published var baseURL: String {

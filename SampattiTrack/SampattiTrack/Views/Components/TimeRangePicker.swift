@@ -5,7 +5,7 @@ struct TimeRangePicker: View {
 
     // Available Ranges
     let ranges: [DateRange] = [
-        .last30Days(),
+        .thisMonth(),
         .lastMonth(),
         .ytd(),
         .all()

@@ -53,10 +53,12 @@ struct DateRange {
         return DateRange(start: start, end: now, name: "YTD")
     }
 
-    static func last30Days() -> DateRange {
+    static func thisMonth() -> DateRange {
+        let calendar = Calendar.current
         let now = Date()
-        let start = Calendar.current.date(byAdding: .day, value: -30, to: now)!
-        return DateRange(start: start, end: now, name: "Last 30 Days")
+        let components = calendar.dateComponents([.year, .month], from: now)
+        let start = calendar.date(from: components)!
+        return DateRange(start: start, end: now, name: "This Month")
     }
 
     static func all() -> DateRange {
@@ -432,6 +434,25 @@ class DashboardCalculator {
             let income = incomeMap[month] ?? 0
             let expense = expenseMap[month] ?? 0
             return (month: month, savings: income - expense)
+        }
+    }
+
+    /// Calculate monthly savings rate (income - expenses) / income, plus absolute savings
+    func calculateMonthlySavingsRate(range: DateRange) -> [(month: String, rate: Double, absolute: Double)] {
+        let incomeData = calculateMonthlyIncome(range: range)
+        let expenseData = calculateMonthlyExpenses(range: range)
+
+        let incomeMap = Dictionary(uniqueKeysWithValues: incomeData.map { ($0.month, $0.amount) })
+        let expenseMap = Dictionary(uniqueKeysWithValues: expenseData.map { ($0.month, $0.amount) })
+
+        let allMonths = Set(incomeMap.keys).union(Set(expenseMap.keys)).sorted()
+
+        return allMonths.map { month in
+            let income = incomeMap[month] ?? 0
+            let expense = expenseMap[month] ?? 0
+            let savings = income - expense
+            let rate = income > 0 ? (savings / income) * 100 : 0
+            return (month: month, rate: rate, absolute: savings)
         }
     }
 
