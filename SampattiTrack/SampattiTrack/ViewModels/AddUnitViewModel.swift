@@ -37,11 +37,44 @@ class AddUnitViewModel: ObservableObject {
         self.modelContext = context
     }
     
-    /// Symbol search disabled in offline mode
+    /// Search symbols using API
     func searchSymbols(query: String) {
-        // Symbol search requires API - disabled in offline-first mode
-        // Users must manually enter code and name
-        searchResults = []
+        guard !query.isEmpty else {
+            searchResults = []
+            return
+        }
+
+        isSearching = true
+
+        // Use existing listUnits API and filter locally
+        // This is a workaround since we don't have a dedicated search endpoint yet
+        APIClient.shared.listUnits { [weak self] result in
+            DispatchQueue.main.async {
+                self?.isSearching = false
+
+                switch result {
+                case .success(let response):
+                    let filtered = response.data.filter { unit in
+                        unit.code.localizedCaseInsensitiveContains(query) ||
+                        unit.name.localizedCaseInsensitiveContains(query) ||
+                        (unit.symbol?.localizedCaseInsensitiveContains(query) ?? false)
+                    }
+
+                    self?.searchResults = filtered.map { unit in
+                        SymbolSearchResult(
+                            symbol: unit.symbol ?? "",
+                            name: unit.name,
+                            exchange: nil,
+                            type: unit.type
+                        )
+                    }
+
+                case .failure(let error):
+                    print("Symbol search failed: \(error)")
+                    self?.searchResults = []
+                }
+            }
+        }
     }
     
     func selectSymbol(_ result: SymbolSearchResult) {
@@ -86,6 +119,16 @@ class AddUnitViewModel: ObservableObject {
                 isSynced: false  // Will be synced later
             )
             context.insert(newUnit)
+
+            // Queue for sync
+            try OfflineQueueHelper.queueUnit(
+                code: code,
+                name: name,
+                symbol: symbol.isEmpty ? nil : symbol,
+                type: type,
+                context: context
+            )
+
             try context.save()
             
             isLoading = false
