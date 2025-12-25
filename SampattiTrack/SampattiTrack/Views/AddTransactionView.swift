@@ -5,13 +5,28 @@ struct AddTransactionView: View {
     @StateObject private var viewModel = AddTransactionViewModel()
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.modelContext) private var modelContext
+    @FocusState private var focusedField: Field?
+
+    enum Field {
+        case description
+        case note
+    }
     
     var body: some View {
         Form {
             Section(header: Text("Details")) {
                 DatePicker("Date", selection: $viewModel.date, displayedComponents: .date)
                 TextField("Description (Payee)", text: $viewModel.description)
+                    .focused($focusedField, equals: .description)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .note }
+
                 TextField("Note", text: $viewModel.note)
+                    .focused($focusedField, equals: .note)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
             }
             
             Section(header: Text("Postings (Splits)")) {
@@ -102,6 +117,10 @@ struct AddTransactionView: View {
         .onAppear {
             viewModel.setModelContext(modelContext)
             viewModel.fetchLocalData()
+            // Auto-focus the description field for quicker entry
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusedField = .description
+            }
         }
         .onChange(of: viewModel.successMessage) {
             if viewModel.successMessage != nil {
