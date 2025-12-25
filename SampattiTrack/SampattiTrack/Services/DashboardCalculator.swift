@@ -69,6 +69,14 @@ struct DateRange {
 class DashboardCalculator {
     private let modelContext: ModelContext
     
+    // Optimization: Reuse formatter to avoid expensive re-creation
+    private let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = Calendar.current.timeZone
+        return formatter
+    }()
+
     // MARK: - Caching for Performance
     private var cachedTransactions: [SDTransaction]?
     private var cacheDate: Date?
@@ -110,11 +118,8 @@ class DashboardCalculator {
         let allTransactions = getCachedTransactions()
         
         // Filter for the selected range
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: range.start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: range.start)
+        let endStr = dateFormatter.string(from: range.end)
         
         let rangeTransactions = allTransactions.filter { $0.date >= startStr && $0.date <= endStr }
         
@@ -123,8 +128,8 @@ class DashboardCalculator {
 
         // YTD - filter from cached transactions
         let ytdRange = DateRange.ytd()
-        let ytdStartStr = formatter.string(from: ytdRange.start)
-        let ytdEndStr = formatter.string(from: ytdRange.end)
+        let ytdStartStr = dateFormatter.string(from: ytdRange.start)
+        let ytdEndStr = dateFormatter.string(from: ytdRange.end)
         let ytdTransactions = allTransactions.filter { $0.date >= ytdStartStr && $0.date <= ytdEndStr }
         let ytdIncome = calculateTotal(transactions: ytdTransactions, type: .income)
         let ytdExpenses = calculateTotal(transactions: ytdTransactions, type: .expense)
@@ -146,7 +151,7 @@ class DashboardCalculator {
         
         // Monthly burn rate: average expenses over last 6 months
         let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date())!
-        let sixMonthStr = formatter.string(from: sixMonthsAgo)
+        let sixMonthStr = dateFormatter.string(from: sixMonthsAgo)
         let recentTransactions = allTransactions.filter { $0.date >= sixMonthStr }
         let recentExpenses = calculateTotal(transactions: recentTransactions, type: .expense)
         let monthlyBurnRate = recentExpenses / 6.0
@@ -184,9 +189,6 @@ class DashboardCalculator {
     private func calculateMoMMetricsCached(allTransactions: [SDTransaction]) -> (Double, Double, Double) {
         let now = Date()
         let calendar = Calendar.current
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
 
         // Define "Current" as Last 30 Days
         guard let startCurrent = calendar.date(byAdding: .day, value: -30, to: now),
@@ -194,9 +196,9 @@ class DashboardCalculator {
             return (0, 0, 0)
         }
         
-        let nowStr = formatter.string(from: now)
-        let startCurrentStr = formatter.string(from: startCurrent)
-        let startPreviousStr = formatter.string(from: startPrevious)
+        let nowStr = dateFormatter.string(from: now)
+        let startCurrentStr = dateFormatter.string(from: startCurrent)
+        let startPreviousStr = dateFormatter.string(from: startPrevious)
 
         // Filter from cached transactions instead of fetching
         let currentTx = allTransactions.filter { $0.date >= startCurrentStr && $0.date <= nowStr }
@@ -238,11 +240,8 @@ class DashboardCalculator {
         // Sum of all postings before start date where account type is Asset (+) or Liability (-)
 
         let start = range.start
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: start)
+        let endStr = dateFormatter.string(from: range.end)
 
         // Fetch opening balance efficiently
         // We only need the SUM of amounts for Asset/Liability postings before startStr
@@ -384,11 +383,8 @@ class DashboardCalculator {
     /// Calculate monthly expense totals for trend chart
     func calculateMonthlyExpenses(range: DateRange) -> [(month: String, amount: Double)] {
         let allTransactions = getCachedTransactions()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: range.start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: range.start)
+        let endStr = dateFormatter.string(from: range.end)
         
         var monthlyData: [String: Double] = [:]
         
@@ -406,11 +402,8 @@ class DashboardCalculator {
     /// Calculate monthly income totals for trend chart
     func calculateMonthlyIncome(range: DateRange) -> [(month: String, amount: Double)] {
         let allTransactions = getCachedTransactions()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: range.start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: range.start)
+        let endStr = dateFormatter.string(from: range.end)
         
         var monthlyData: [String: Double] = [:]
         
@@ -482,11 +475,8 @@ class DashboardCalculator {
     private func fetchTransactions(in range: DateRange) -> [SDTransaction] {
         // Note: SwiftData predicate with Date comparison on String fields is tricky.
         // Assuming dates are strictly ISO8601 YYYY-MM-DD
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: range.start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: range.start)
+        let endStr = dateFormatter.string(from: range.end)
 
         // Fetch all and filter in memory if Predicate fails on strings?
         // String comparison works for ISO8601.
@@ -601,11 +591,8 @@ class DashboardCalculator {
     
     /// Optimized net worth history using pre-fetched transactions
     private func calculateNetWorthHistoryCached(allTransactions: [SDTransaction], range: DateRange) -> [NetWorthDataPoint] {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = Calendar.current.timeZone
-        let startStr = formatter.string(from: range.start)
-        let endStr = formatter.string(from: range.end)
+        let startStr = dateFormatter.string(from: range.start)
+        let endStr = dateFormatter.string(from: range.end)
 
         var currentNetWorth: Double = 0
         var history: [NetWorthDataPoint] = []
