@@ -145,7 +145,12 @@ struct EditAccountView: View {
                 }
             }
             
-            Section {
+            Section(footer: Group {
+                if viewModel.name.isEmpty {
+                    Text("Account name cannot be empty.")
+                        .foregroundColor(.red)
+                }
+            }) {
                 Button(action: { viewModel.save() }) {
                     if viewModel.isSaving {
                         ProgressView()
@@ -153,7 +158,7 @@ struct EditAccountView: View {
                         Text("Save Changes")
                     }
                 }
-                .disabled(viewModel.isLoading || viewModel.isSaving)
+                .disabled(viewModel.isLoading || viewModel.isSaving || viewModel.name.isEmpty)
             }
         }
         .navigationTitle("Edit Account")
