@@ -140,9 +140,7 @@ struct CreditCardDetailView: View {
     }
     
     func periodLabel(_ period: StatementPeriod) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM yyyy"
-        let label = formatter.string(from: period.endDate)
+        let label = DateFormatterCache.formatMonthYear(period.endDate)
         if period.status == .open {
             return "\(label) (Current)"
         }
@@ -217,10 +215,8 @@ struct CreditCardDetailView: View {
              guard let txn = p.transaction else { return false }
              let dateStr = txn.date
              // Parse date string "2023-10-27"
-             // Using ISO8601 or simple formatter
-             let formatter = ISO8601DateFormatter()
-             formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-             guard let date = formatter.date(from: dateStr) else { return false }
+             // Using cached ISO8601 formatter
+             guard let date = DateFormatterCache.parseISO8601(dateStr) else { return false }
              
              return date >= period.startDate && date <= period.endDate
          }
@@ -246,9 +242,7 @@ struct CreditCardDetailView: View {
          let previousPostings = postings.filter { p in
              guard let txn = p.transaction else { return false }
              let dateStr = txn.date
-             let formatter = ISO8601DateFormatter()
-             formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-             guard let date = formatter.date(from: dateStr) else { return false }
+             guard let date = DateFormatterCache.parseISO8601(dateStr) else { return false }
              return date < period.startDate
          }
          
@@ -478,21 +472,11 @@ struct TransactionRowSimple: View {
     }
     
     func formatDay(_ dateStr: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        guard let date = formatter.date(from: dateStr) else { return "" }
-        let f2 = DateFormatter()
-        f2.dateFormat = "dd"
-        return f2.string(from: date)
+        return DateFormatterCache.formatDay(dateStr)
     }
     
     func formatMonth(_ dateStr: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
-        guard let date = formatter.date(from: dateStr) else { return "" }
-        let f2 = DateFormatter()
-        f2.dateFormat = "MMM"
-        return f2.string(from: date)
+        return DateFormatterCache.formatMonth(dateStr)
     }
     
     func formatCurrency(_ val: Decimal) -> String {
