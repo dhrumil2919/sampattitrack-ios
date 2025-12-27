@@ -113,12 +113,12 @@ struct AddAccountView: View {
                         
                         TextField("Network (e.g., Visa, MasterCard)", text: $network)
                         
-                        Stepper("Statement Day: \\(statementDay)", value: $statementDay, in: 1...31)
+                        Stepper("Statement Day: \(statementDay)", value: $statementDay, in: 1...31)
                         Text("Day of month when statement is generated")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         
-                        Stepper("Due Day: \\(dueDay)", value: $dueDay, in: 1...31)
+                        Stepper("Due Day: \(dueDay)", value: $dueDay, in: 1...31)
                         Text("Day of month when payment is due")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -163,7 +163,7 @@ struct AddAccountView: View {
         do {
             // Generate unique ID in the backend format (category:parent:name)
             let parentPath = selectedParent?.id ?? selectedCategory.rawValue
-            let accountId = "\\(parentPath):\\(name)"
+            let accountId = "\(parentPath):\(name)"
             
             // Prepare metadata if credit card
             var metadata: Data? = nil
@@ -224,7 +224,7 @@ struct AddAccountView: View {
             dismiss()
             
         } catch {
-            errorMessage = "Failed to create account: \\(error.localizedDescription)"
+            errorMessage = "Failed to create account: \(error.localizedDescription)"
             showError = true
         }
     }

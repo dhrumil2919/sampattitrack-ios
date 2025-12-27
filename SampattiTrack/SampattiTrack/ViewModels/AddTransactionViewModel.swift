@@ -104,8 +104,14 @@ class AddTransactionViewModel: ObservableObject {
         postings[index].amount = String(qty * price)
     }
     
-    /// Creates transaction by queuing it for offline sync
-    /// Stores raw JSON to avoid SwiftData relationship memory issues
+    /// OFFLINE-FIRST: Creates transaction by writing to local SwiftData FIRST
+    /// Then queues backend operation separately (non-blocking)
+    /// 
+    /// Flow:
+    /// 1. Write SDTransaction + SDPosting to SwiftData (isSynced = false)
+    /// 2. Save locally - transaction appears in UI immediately
+    /// 3. Queue backend sync operation
+    /// 4. Background sync happens asynchronously
     func createTransaction() {
         guard isBalanced else {
             errorMessage = "Transaction does not balance. Imbalance: \(CurrencyFormatter.formatCheck(abs(totalAmount)))"
@@ -129,18 +135,53 @@ class AddTransactionViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd"
         let dateString = formatter.string(from: date)
         
+        // OFFLINE-FIRST: Generate stable UUIDs
         let transactionID = UUID()
-        let postingsJSON = postings.map { p in
-            [
-                "id": UUID().uuidString,
-                "account_id": p.accountID,
-                "amount": p.amount,
-                "quantity": p.quantity.isEmpty ? p.amount : p.quantity,
-                "unit_code": p.unitCode
-            ] as [String: Any]
-        }
+        let postingIDs = postings.map { _ in UUID() }
         
         do {
+            // STEP 1: Write to SwiftData FIRST (source of truth)
+            let transaction = SDTransaction(
+                id: transactionID,
+                date: dateString,
+                desc: description,
+                note: note.isEmpty ? nil : note,
+                isSynced: false  // Mark as unsynced
+            )
+            context.insert(transaction)
+            
+            // Create SDPosting objects
+            var sdPostings: [SDPosting] = []
+            for (index, p) in postings.enumerated() {
+                let posting = SDPosting(
+                    id: postingIDs[index],
+                    accountID: p.accountID,
+                    amount: p.amount,
+                    quantity: p.quantity.isEmpty ? p.amount : p.quantity,
+                    unitCode: p.unitCode,
+                    tags: nil  // Tags not implemented in offline create yet
+                )
+                posting.transaction = transaction
+                context.insert(posting)
+                sdPostings.append(posting)
+            }
+            transaction.postings = sdPostings
+            
+            // Save to SwiftData - transaction now visible in UI!
+            try context.save()
+            print("[AddTransaction] ✓ Saved locally: \(description)")
+            
+            // STEP 2: Queue for backend sync (non-blocking)
+            let postingsJSON = postings.enumerated().map { (index, p) in
+                [
+                    "id": postingIDs[index].uuidString,
+                    "account_id": p.accountID,
+                    "amount": p.amount,
+                    "quantity": p.quantity.isEmpty ? p.amount : p.quantity,
+                    "unit_code": p.unitCode
+                ] as [String: Any]
+            }
+            
             try OfflineQueueHelper.queueTransaction(
                 id: transactionID,
                 date: dateString,
@@ -150,20 +191,23 @@ class AddTransactionViewModel: ObservableObject {
                 context: context
             )
             
+            print("[AddTransaction] ⏫ Queued for backend sync")
+            
             isSaving = false
-            successMessage = "Transaction Queued for Sync!"
+            successMessage = "Transaction Created!"
             
             // Reset form
-            description = ""
-            note = ""
-            date = Date()
-            postings = [
+            self.description = ""
+            self.note = ""
+            self.date = Date()
+            self.postings = [
                 EditablePosting(accountID: "", amount: "", quantity: ""),
                 EditablePosting(accountID: "", amount: "", quantity: "")
             ]
         } catch {
             isSaving = false
-            errorMessage = "Failed to queue transaction: \(error)"
+            errorMessage = "Failed to create transaction: \(error)"
+            print("[AddTransaction] ✗ Error: \(error)")
         }
     }
 }

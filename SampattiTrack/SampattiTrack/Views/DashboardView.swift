@@ -4,6 +4,8 @@ import SwiftData
 struct DashboardView: View {
     @StateObject private var viewModel = DashboardViewModel()
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject var syncManager: SyncManager
+    @EnvironmentObject var networkMonitor: NetworkMonitor
     
     
     var body: some View {
@@ -218,16 +220,58 @@ struct DashboardView: View {
             }
             .navigationTitle("Dashboard")
             .refreshable {
+                // OFFLINE-FIRST: refreshable only triggers local view refresh, not blocking sync
                 viewModel.fetchAll()
             }
             .onAppear {
                 viewModel.setContainer(modelContext.container)
+                viewModel.syncManager = syncManager
+                viewModel.networkMonitor = networkMonitor
                 viewModel.fetchAll()
             }
             .toolbar {
+                // OFFLINE-FIRST: Show sync/network status
+                ToolbarItem(placement: .navigationBarLeading) {
+                    HStack(spacing: 8) {
+                        if viewModel.syncManager?.isSyncing == true {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else if viewModel.networkMonitor?.isConnected == false {
+                            Image(systemName: "wifi.slash")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { AuthManager.shared.logout() }) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                    HStack(spacing: 12) {
+                        // DEBUG: Debug menu for clearing cache/queue
+                        Menu {
+                            Button(role: .destructive) {
+                                Task {
+                                    await syncManager.clearSyncQueue()
+                                }
+                            } label: {
+                                Label("Clear Sync Queue", systemImage: "trash")
+                            }
+                            
+                            Button(role: .destructive) {
+                                Task {
+                                    await syncManager.clearAllData()
+                                    // Pull fresh data after clearing
+                                    await syncManager.syncAll()
+                                }
+                            } label: {
+                                Label("Clear All & Re-sync", systemImage: "arrow.clockwise")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        
+                        Button(action: { AuthManager.shared.logout() }) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                        }
                     }
                 }
             }

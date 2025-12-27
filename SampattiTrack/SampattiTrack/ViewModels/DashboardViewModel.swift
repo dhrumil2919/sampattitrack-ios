@@ -58,6 +58,10 @@ class DashboardViewModel: ObservableObject {
     }
 
     private var container: ModelContainer?
+    
+    // OFFLINE-FIRST: References for UI status indicators
+    weak var syncManager: SyncManager?
+    weak var networkMonitor: NetworkMonitor?
 
     func setContainer(_ container: ModelContainer) {
         self.container = container
