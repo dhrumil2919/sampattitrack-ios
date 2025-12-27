@@ -1,12 +1,12 @@
-name: iOS Build
+name: iOS Test
 
 on:
   pull_request:
     branches: [ "main" ]
 
 jobs:
-  build:
-    name: Build and Check Syntax
+  test:
+    name: Run Tests
     runs-on: macos-latest
     permissions:
       pull-requests: write
@@ -21,12 +21,12 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Build
+      - name: Run Tests
         id: build
         continue-on-error: true
         run: |
           set +e
-          xcodebuild build \
+          xcodebuild test \
             -project SampattiTrack/SampattiTrack.xcodeproj \
             -scheme SampattiTrack \
             -destination 'platform=iOS Simulator,name=iPhone 17' \
@@ -78,8 +78,8 @@ jobs:
             });
             
             // Build the comment body
-            let commentBody = '## ❌ iOS Build Failed\n\n';
-            commentBody += '### Build Errors\n\n';
+            let commentBody = '## ❌ iOS Tests Failed\n\n';
+            commentBody += '### Test Errors\n\n';
             
             if (errorLines.length > 0) {
               commentBody += '```\n';
@@ -100,7 +100,7 @@ jobs:
               commentBody += '\n```\n\n';
             }
             
-            commentBody += '> 💡 **Tip**: Review the [full build log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for complete details.\n';
+            commentBody += '> 💡 **Tip**: Review the [full test log](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for complete details.\n';
             
             // Post comment to PR
             await github.rest.issues.createComment({
@@ -120,9 +120,9 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '## ✅ iOS Build Succeeded\n\nThe build completed successfully with no errors!'
+              body: '## ✅ iOS Tests Passed\n\nAll tests completed successfully!'
             });
 
-      - name: Fail Job if Build Failed
+      - name: Fail Job if Tests Failed
         if: steps.build.outputs.exit_code != '0'
         run: exit 1
