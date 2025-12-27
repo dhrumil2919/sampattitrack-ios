@@ -129,25 +129,87 @@ struct SyncResponseDTO: Codable {
 actor SyncActor {
     // MARK: - Public Interface
     
-    func performFullSync() async throws {
+    /// OFFLINE-FIRST: Performs full two-way sync (non-blocking)
+    /// - Push local changes (with exponential backoff)
+    /// - Pull remote data
+    /// - Never throws errors to UI layer
+    func performFullSync() async {
         print("[SyncActor] Starting full sync...")
         
-        // Push local changes first
-        try await pushLocalChanges()
+        do {
+            // Push local changes first (with retry logic)
+            try await pushLocalChanges()
+        } catch {
+            // OFFLINE-FIRST: Never block on push failures
+            print("[SyncActor] ⚠️ Push failed (non-blocking): \(error)")
+        }
         
-        // Pull remote data
-        try await pullRemoteData()
+        do {
+            // Pull remote data
+            try await pullRemoteData()
+        } catch {
+            // OFFLINE-FIRST: Never block on pull failures
+            print("[SyncActor] ⚠️ Pull failed (non-blocking): \(error)")
+        }
         
-        print("[SyncActor] Sync complete")
+        print("[SyncActor] Sync complete (errors are non-blocking)")
     }
     
-    // MARK: - Push Logic (Queue-Based)
+    // MARK: - Debug Methods
     
+    /// DEBUG: Clear all pending sync queue items
+    /// Useful for troubleshooting when items are stuck
+    func clearSyncQueue() throws {
+        let descriptor = FetchDescriptor<SyncQueueItem>()
+        let items = try modelContext.fetch(descriptor)
+        
+        print("[SyncActor] 🗑️ Clearing \(items.count) queued items")
+        for item in items {
+            modelContext.delete(item)
+        }
+        try modelContext.save()
+        print("[SyncActor] ✓ Sync queue cleared")
+    }
+    
+    /// DEBUG: Clear all local data (transactions, accounts, tags, etc.)
+    /// WARNING: This will delete all local data!
+    func clearAllLocalData() throws {
+        print("[SyncActor] 🗑️ WARNING: Clearing ALL local data")
+        try modelContext.delete(model: SDPosting.self)
+        try modelContext.delete(model: SDTransaction.self)
+        try modelContext.delete(model: SDAccount.self)
+        try modelContext.delete(model: SDTag.self)
+        try modelContext.delete(model: SDUnit.self)
+        try modelContext.delete(model: SDPrice.self)
+        try modelContext.delete(model: SyncQueueItem.self)
+        try modelContext.save()
+        
+        // Clear UserDefaults cache
+        UserDefaults.standard.removeObject(forKey: "cached_net_worth")
+        UserDefaults.standard.removeObject(forKey: "cached_cash_flow")
+        UserDefaults.standard.removeObject(forKey: "cached_tax_analysis")
+        UserDefaults.standard.removeObject(forKey: "cached_capital_gains")
+        UserDefaults.standard.removeObject(forKey: "cached_portfolio_analysis")
+        
+        print("[SyncActor] ✓ All local data and cache cleared")
+    }
+    
+    // MARK: - Push Logic (Queue-Based with Exponential Backoff)
+    
+    /// OFFLINE-FIRST: Process queued operations with exponential backoff
+    /// - Skips items that are still in backoff period
+    /// - Marks items as permanently failed after max retries
+    /// - Never throws errors (non-blocking)
     private func pushLocalChanges() async throws {
         print("[SyncActor] Processing offline queue...")
         
-        // Fetch all pending queue items
+        // Fetch pending and retrying queue items (exclude permanently failed)
+        // Note: SwiftData predicates require string literals, not enum rawValues
         let queueDescriptor = FetchDescriptor<SyncQueueItem>(
+            predicate: #Predicate { item in
+                item.syncStatus == "pending" ||
+                item.syncStatus == "retrying"
+            },
             sortBy: [SortDescriptor(\.createdAt)]
         )
         
@@ -158,22 +220,52 @@ actor SyncActor {
             return
         }
         
-        print("[SyncActor] Processing \(queueItems.count) queued operations...")
+        print("[SyncActor] Found \(queueItems.count) queued operations")
+        
+        let maxRetries = 10 // Permanent failure threshold
+        var processedCount = 0
         
         for item in queueItems {
+            // OFFLINE-FIRST: Check if item can retry (exponential backoff)
+            guard item.canRetry else {
+                let remainingTime = item.backoffDelaySeconds - Date().timeIntervalSince(item.lastAttemptAt ?? Date())
+                print("[SyncActor] ⏸ Skipping \(item.operationType): backoff for \(Int(remainingTime))s")
+                continue
+            }
+            
+            // Check if max retries exceeded
+            if item.retryCount >= maxRetries {
+                print("[SyncActor] ✗ Permanently failed: \(item.operationType) (exceeded \(maxRetries) retries)")
+                item.status = .failed
+                try modelContext.save()
+                continue
+            }
+            
+            // Update attempt metadata
+            item.lastAttemptAt = Date()
+            
+            // Attempt sync
             let success = await processQueueItem(item)
             
             if success {
-                // Remove from queue
+                // OFFLINE-FIRST: Mark as succeeded and delete from queue
+                print("[SyncActor] ✓ Synced: \(item.operationType)")
                 modelContext.delete(item)
                 try modelContext.save()
-                print("[SyncActor] ✓ Completed: \(item.operationType)")
+                processedCount += 1
             } else {
-                // Increment retry count
+                // OFFLINE-FIRST: Increment retry, set status to retrying
                 item.retryCount += 1
+                item.status = .retrying
                 try modelContext.save()
-                print("[SyncActor] ✗ Failed: \(item.operationType) (retry \(item.retryCount))")
+                
+                let nextRetryIn = item.backoffDelaySeconds
+                print("[SyncActor] ✗ Failed: \(item.operationType) (retry \(item.retryCount)/\(maxRetries), next in \(Int(nextRetryIn))s)")
             }
+        }
+        
+        if processedCount > 0 {
+            print("[SyncActor] Successfully synced \(processedCount) operations")
         }
     }
     
@@ -182,8 +274,15 @@ actor SyncActor {
             // Convert Data back to dictionary for API call
             guard let jsonObject = try? JSONSerialization.jsonObject(with: item.jsonData),
                   let jsonDict = jsonObject as? [String: Any] else {
+                print("[SyncActor] ✗ Failed to deserialize JSON for \(item.operationType)")
                 continuation.resume(returning: false)
                 return
+            }
+            
+            print("[SyncActor] → Syncing: \(item.method) \(item.endpoint)")
+            if let jsonPreview = try? JSONSerialization.data(withJSONObject: jsonDict, options: .prettyPrinted),
+               let jsonString = String(data: jsonPreview, encoding: .utf8) {
+                print("[SyncActor]   Payload: \(jsonString.prefix(200))...")
             }
             
             struct GenericResponse: Codable {
@@ -197,10 +296,12 @@ actor SyncActor {
                 body: jsonDict
             ) { (result: Result<GenericResponse, APIClient.APIError>) in
                 switch result {
-                case .success:
+                case .success(let response):
+                    print("[SyncActor] ← Success: \(item.operationType) - \(response.success)")
                     continuation.resume(returning: true)
                 case .failure(let error):
-                    print("[SyncActor] Queue item failed: \(error)")
+                    print("[SyncActor] ← Failed: \(item.operationType)")
+                    print("[SyncActor]   Error: \(error)")
                     continuation.resume(returning: false)
                 }
             }
@@ -476,6 +577,8 @@ actor SyncActor {
         print("[SyncActor] Upserting \(accounts.count) accounts...")
         
         for accountDTO in accounts {
+            print("[SyncActor]   Processing account: \(accountDTO.id) - \(accountDTO.name)")
+            
             // Convert GenericJSON metadata to Data
             var metadataData: Data? = nil
             if let meta = accountDTO.metadata {
@@ -491,7 +594,8 @@ actor SyncActor {
             )
             
             if let existing = try? modelContext.fetch(fetchDesc).first {
-                // Update existing
+                // OFFLINE-FIRST: Update existing account and mark as synced
+                print("[SyncActor]     ✓ Found existing account, updating")
                 existing.name = accountDTO.name
                 existing.category = accountDTO.category
                 existing.type = accountDTO.type
@@ -499,8 +603,10 @@ actor SyncActor {
                 existing.icon = accountDTO.icon
                 existing.parentID = accountDTO.parent_id
                 existing.metadata = metadataData
+                existing.isSynced = true  // Mark as synced
             } else {
                 // Insert new
+                print("[SyncActor]     + Inserting new account")
                 let newAccount = SDAccount(
                     id: accountDTO.id,
                     name: accountDTO.name,

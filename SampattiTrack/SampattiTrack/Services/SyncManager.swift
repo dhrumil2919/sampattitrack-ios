@@ -21,7 +21,8 @@ class SyncManager: ObservableObject {
         }
     }
     
-    /// Performs full two-way sync: push local changes, then pull remote data
+    /// OFFLINE-FIRST: Performs full two-way sync (non-blocking)
+    /// Sync failures are logged but never block the UI
     func syncAll() async {
         guard !isSyncing else { return }
         guard AuthManager.shared.isAuthenticated else {
@@ -35,20 +36,50 @@ class SyncManager: ObservableObject {
         
         await MainActor.run { isSyncing = true }
         
-        do {
-            try await actor.performFullSync()
-            await MainActor.run {
-                lastSyncDate = Date()
-                isSyncing = false
-            }
-        } catch {
-            print("Sync failed: \(error)")
-            await MainActor.run { isSyncing = false }
+        // OFFLINE-FIRST: performFullSync never throws
+        await actor.performFullSync()
+        
+        await MainActor.run {
+            lastSyncDate = Date()
+            isSyncing = false
         }
     }
     
     /// Initial sync after login - same as syncAll (actor handles delete)
     func initialSync() async {
         await syncAll()
+    }
+    
+    // MARK: - Debug Methods
+    
+    /// DEBUG: Clear all pending sync queue items
+    func clearSyncQueue() async {
+        guard let actor = syncActor else {
+            print("SyncActor not initialized")
+            return
+        }
+        
+        do {
+            try await actor.clearSyncQueue()
+            print("[SyncManager] Sync queue cleared")
+        } catch {
+            print("[SyncManager] Failed to clear sync queue: \(error)")
+        }
+    }
+    
+    /// DEBUG: Clear all local data and cache
+    /// WARNING: This will delete all local data!
+    func clearAllData() async {
+        guard let actor = syncActor else {
+            print("SyncActor not initialized")
+            return
+        }
+        
+        do {
+            try await actor.clearAllLocalData()
+            print("[SyncManager] All data and cache cleared")
+        } catch {
+            print("[SyncManager] Failed to clear data: \(error)")
+        }
     }
 }

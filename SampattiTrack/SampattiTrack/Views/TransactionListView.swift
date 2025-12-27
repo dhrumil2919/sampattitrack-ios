@@ -182,9 +182,18 @@ private struct TransactionRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 // Description or fallback to accounts
-                Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
-                    .font(.headline)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
+                        .font(.headline)
+                        .lineLimit(1)
+                    
+                    // OFFLINE-FIRST: Show sync status indicator
+                    if !transaction.isSynced {
+                        Image(systemName: "icloud.and.arrow.up")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
                 
                 // Show accounts on second line
                 Text(accountIds)
