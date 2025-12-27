@@ -16,8 +16,14 @@ struct LoginView: View {
                     Section {
                         TextField("Username", text: $viewModel.username)
                             .autocapitalization(.none)
+                            .textContentType(.username)
+                            .keyboardType(.emailAddress)
+                            .submitLabel(.next)
                         
                         SecureField("Password", text: $viewModel.password)
+                            .textContentType(.password)
+                            .submitLabel(.go)
+                            .onSubmit { viewModel.login() }
                     }
                 }
                 .listStyle(InsetGroupedListStyle())
@@ -35,6 +41,7 @@ struct LoginView: View {
                     if viewModel.isLoading {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .accessibilityLabel("Logging in...")
                     } else {
                         Text("Login")
                             .fontWeight(.bold)
@@ -48,6 +55,7 @@ struct LoginView: View {
                 .padding(.horizontal)
                 .padding(.top, 20)
                 .disabled(viewModel.isLoading)
+                .opacity(viewModel.isLoading ? 0.7 : 1.0)
                 
                 Spacer()
             }
