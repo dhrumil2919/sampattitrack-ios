@@ -16,9 +16,8 @@ struct NetWorthDataPoint: Codable, Identifiable {
 
     // Helper to get Date object
     var dateObject: Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: date) ?? ISO8601DateFormatter().date(from: date)
+        return DateFormatterCache.iso8601WithFractionalSeconds.date(from: date)
+            ?? DateFormatterCache.iso8601Default.date(from: date)
     }
 
     var netWorthValue: Double {

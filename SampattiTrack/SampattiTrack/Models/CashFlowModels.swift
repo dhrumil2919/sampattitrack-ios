@@ -22,8 +22,7 @@ struct CashFlowDataPoint: Codable, Identifiable {
     }
     
     var date: Date? {
-        let formatter = ISO8601DateFormatter()
-        return formatter.date(from: dateString)
+        return DateFormatterCache.iso8601Default.date(from: dateString)
     }
     
     var incomeValue: Double {
