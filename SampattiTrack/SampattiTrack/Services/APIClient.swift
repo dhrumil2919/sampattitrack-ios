@@ -90,7 +90,9 @@ final class APIClient: ObservableObject, @unchecked Sendable {
                 completion(.success(decoded))
             } catch {
                 // Sentinel: Do not log full response body as it may contain sensitive data
-                print("Decoding failed for endpoint: \(endpoint). Error: \(error)")
+                // We also sanitize the endpoint to remove query parameters which might contain PII
+                let safeEndpoint = endpoint.components(separatedBy: "?").first ?? endpoint
+                print("Decoding failed for endpoint: \(safeEndpoint). Error: \(error)")
                 completion(.failure(.decodingError(error)))
             }
         }.resume()
