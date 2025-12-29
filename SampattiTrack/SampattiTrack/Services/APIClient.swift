@@ -90,7 +90,9 @@ final class APIClient: ObservableObject, @unchecked Sendable {
                 completion(.success(decoded))
             } catch {
                 // Sentinel: Do not log full response body as it may contain sensitive data
-                print("Decoding failed for endpoint: \(endpoint). Error: \(error)")
+                // Also sanitize the endpoint to remove potential query parameters (e.g. tokens, PII)
+                let safeEndpoint = self.sanitizeEndpoint(endpoint)
+                print("Decoding failed for endpoint: \(safeEndpoint). Error: \(error)")
                 completion(.failure(.decodingError(error)))
             }
         }.resume()
@@ -149,6 +151,16 @@ final class APIClient: ObservableObject, @unchecked Sendable {
         } catch {
             completion(.failure(.networkError(error)))
         }
+    }
+
+    // MARK: - Security Helpers
+
+    /// Sanitizes the endpoint URL by removing query parameters to prevent logging sensitive data
+    private func sanitizeEndpoint(_ endpoint: String) -> String {
+        guard let components = URLComponents(string: endpoint) else {
+            return "unknown-endpoint"
+        }
+        return components.path
     }
 }
 
