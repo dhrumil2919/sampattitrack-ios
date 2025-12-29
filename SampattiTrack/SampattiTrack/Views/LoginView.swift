@@ -2,6 +2,12 @@ import SwiftUI
 
 struct LoginView: View {
     @StateObject private var viewModel = LoginViewModel()
+    @FocusState private var focusedField: Field?
+
+    enum Field {
+        case username
+        case password
+    }
     
     var body: some View {
         NavigationView {
@@ -15,9 +21,17 @@ struct LoginView: View {
                 List {
                     Section {
                         TextField("Username", text: $viewModel.username)
-                            .autocapitalization(.none)
+                            .textInputAutocapitalization(.never)
+                            .textContentType(.username)
+                            .focused($focusedField, equals: .username)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .password }
                         
                         SecureField("Password", text: $viewModel.password)
+                            .textContentType(.password)
+                            .focused($focusedField, equals: .password)
+                            .submitLabel(.go)
+                            .onSubmit { viewModel.login() }
                     }
                 }
                 .listStyle(InsetGroupedListStyle())
