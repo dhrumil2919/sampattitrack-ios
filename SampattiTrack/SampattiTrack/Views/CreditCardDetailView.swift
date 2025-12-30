@@ -157,13 +157,20 @@ struct CreditCardDetailView: View {
         
         let calendar = Calendar.current
         
+        // Determine if we need to shift the window (if today is past statement day of current month)
+        // If today > statementDay, the current open cycle ends next month.
+        var shiftMonth = 0
+        if let day = calendar.dateComponents([.day], from: now).day, day > statementDay {
+            shiftMonth = 1
+        }
+
         // Generate last 12 months
         for i in 0..<12 {
-            // End Date: statementDay of (Current Month - i)
+            // End Date: statementDay of (Current Month + shift - i)
             // Start Date: (End Date - 1 Month) + 1 Day
             
             var components = calendar.dateComponents([.year, .month], from: now)
-            components.month = (components.month ?? 1) - i
+            components.month = (components.month ?? 1) + shiftMonth - i
             components.day = statementDay
             
             guard let endDate = calendar.date(from: components) else { continue }
@@ -184,12 +191,15 @@ struct CreditCardDetailView: View {
                  dueDate = calendar.date(byAdding: .day, value: 20, to: endDate)!
             }
             
-            // Status
+            // Status Logic
             var status: StatementStatus = .closed
-            if now >= startDate && now <= endDate {
+
+            // endDate is at 00:00:00. To include the full statement day, we compare up to end of that day.
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: endDate) ?? endDate
+
+            if now >= startDate && now < endOfDay {
                 status = .open // Current cycle
-            } else if now > endDate && now > dueDate {
-                 // Check if paid? For now just mark closed or overdue logic separate
+            } else if now >= endOfDay && now > dueDate {
                  status = .closed
             }
             
