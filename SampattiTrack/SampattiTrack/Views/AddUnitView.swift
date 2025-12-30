@@ -16,10 +16,10 @@ struct AddUnitView: View {
                     }
                 }
                 
-                TextField("Name", text: $viewModel.name)
+                TextField("Name *", text: $viewModel.name)
                     .focused($isNameFieldFocused)
                 
-                TextField("Code", text: $viewModel.code)
+                TextField("Code *", text: $viewModel.code)
                     .autocapitalization(.allCharacters)
             }
             
@@ -39,10 +39,18 @@ struct AddUnitView: View {
                 }
             }
             
-            Button("Create Unit") {
-                viewModel.createUnit()
+            Section(footer: Group {
+                if viewModel.name.isEmpty || viewModel.code.isEmpty {
+                    Text("Name and Code are required to create a unit.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }) {
+                Button("Create Unit") {
+                    viewModel.createUnit()
+                }
+                .disabled(viewModel.isLoading || viewModel.code.isEmpty || viewModel.name.isEmpty)
             }
-            .disabled(viewModel.isLoading || viewModel.code.isEmpty || viewModel.name.isEmpty)
         }
         .navigationTitle("New Unit")
         .onAppear {
