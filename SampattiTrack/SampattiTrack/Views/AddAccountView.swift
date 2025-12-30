@@ -62,7 +62,7 @@ struct AddAccountView: View {
         NavigationView {
             Form {
                 Section("Basic Information") {
-                    TextField("Account Name", text: $name)
+                    TextField("Account Name *", text: $name)
                         .textContentType(.name)
                     
                     Picker("Category", selection: $selectedCategory) {
@@ -155,6 +155,17 @@ struct AddAccountView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage)
+            }
+            .overlay(alignment: .bottom) {
+                if name.isEmpty {
+                    Text("Name is required to save.")
+                        .font(.caption)
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                        .padding(.bottom)
+                        .transition(.move(edge: .bottom))
+                }
             }
         }
     }
