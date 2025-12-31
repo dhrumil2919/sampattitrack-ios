@@ -38,26 +38,33 @@ extension SDTransaction {
     func determineType() -> Transaction.TransactionType {
         guard let postings = postings, !postings.isEmpty else { return .transfer }
 
-        // Find max posting (largest positive value)
-        guard let maxPosting = postings.max(by: { posting1, posting2 in
-            let amount1 = Double(posting1.amount) ?? 0.0
-            let amount2 = Double(posting2.amount) ?? 0.0
-            return amount1 < amount2
-        }) else {
-            return .transfer
+        // OPTIMIZATION: Single pass to find max and min postings.
+        // Previously used .max(by:) and .min(by:) which iterated twice and performed O(4N) string conversions.
+        // This reduces it to O(N) string conversions.
+
+        var maxPosting: SDPosting?
+        var minPosting: SDPosting?
+        var maxVal = -Double.greatestFiniteMagnitude
+        var minVal = Double.greatestFiniteMagnitude
+
+        for posting in postings {
+            let val = Double(posting.amount) ?? 0.0
+
+            if val > maxVal {
+                maxVal = val
+                maxPosting = posting
+            }
+
+            if val < minVal {
+                minVal = val
+                minPosting = posting
+            }
         }
 
-        // Find min posting (most negative value)
-        guard let minPosting = postings.min(by: { posting1, posting2 in
-            let amount1 = Double(posting1.amount) ?? 0.0
-            let amount2 = Double(posting2.amount) ?? 0.0
-            return amount1 < amount2
-        }) else {
-            return .transfer
-        }
+        guard let maxP = maxPosting, let minP = minPosting else { return .transfer }
 
-        let maxCategory = maxPosting.category
-        let minCategory = minPosting.category
+        let maxCategory = maxP.category
+        let minCategory = minP.category
 
         // Apply rules based on max and min categories
         switch maxCategory {
