@@ -128,62 +128,55 @@ private struct TransactionRowView: View {
     let transaction: SDTransaction
     let accountID: String?
 
-    var transactionType: Transaction.TransactionType {
-        // If viewing from account context, use simple inflow/outflow logic
-        if let accountID = accountID {
-            return transaction.amountForAccount(accountID) > 0 ? .income : .expense
-        }
-        // Otherwise use smart category-based logic
-        return transaction.determineType()
-    }
-
-    var displayAmount: String {
-        if let accountID = accountID {
-            let amount = transaction.amountForAccount(accountID)
-            let prefix = amount > 0 ? "+" : ""
-            return "\(prefix)\(CurrencyFormatter.formatCheck(abs(amount)))"
-        }
-        return CurrencyFormatter.formatCheck(transaction.displayAmount)
-    }
-
-    var amountColor: Color {
-        switch transactionType {
-        case .expense:
-            return .red
-        case .income:
-            return .green
-        case .transfer:
-            return .blue
+    // Helpers for display
+    private func color(for type: Transaction.TransactionType) -> Color {
+        switch type {
+        case .expense: return .red
+        case .income: return .green
+        case .transfer: return .blue
         }
     }
 
-    var iconName: String {
-        switch transactionType {
-        case .expense:
-            return "arrow.up.circle.fill"
-        case .income:
-            return "arrow.down.circle.fill"
-        case .transfer:
-            return "arrow.left.arrow.right.circle.fill"
+    private func icon(for type: Transaction.TransactionType) -> String {
+        switch type {
+        case .expense: return "arrow.up.circle.fill"
+        case .income: return "arrow.down.circle.fill"
+        case .transfer: return "arrow.left.arrow.right.circle.fill"
         }
-    }
-    // Get all unique account IDs from postings
-    var accountIds: String {
-        let ids = transaction.postings?.compactMap { $0.accountID } ?? []
-        return ids.joined(separator: " → ")
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        // OPTIMIZATION: Calculate expensive values once per render
+        // 1. Determine type and amount string (avoids redundant amountForAccount calls)
+        let type: Transaction.TransactionType
+        let amountString: String
+
+        if let accountID = accountID {
+            // In account context, we check amount once
+            let amount = transaction.amountForAccount(accountID)
+            type = amount > 0 ? .income : .expense
+            let prefix = amount > 0 ? "+" : ""
+            amountString = "\(prefix)\(CurrencyFormatter.formatCheck(abs(amount)))"
+        } else {
+            // In global context
+            type = transaction.determineType()
+            amountString = CurrencyFormatter.formatCheck(transaction.displayAmount)
+        }
+
+        // 2. Compute account IDs string (avoids relationship traversal and string joining)
+        let ids = transaction.postings?.compactMap { $0.accountID } ?? []
+        let accountIdsText = ids.joined(separator: " → ")
+
+        return HStack(spacing: 12) {
             // Icon
-            Image(systemName: iconName)
+            Image(systemName: icon(for: type))
                 .font(.title2)
-                .foregroundColor(amountColor)
+                .foregroundColor(color(for: type))
 
             VStack(alignment: .leading, spacing: 2) {
                 // Description or fallback to accounts
                 HStack(spacing: 4) {
-                    Text(transaction.desc.isEmpty ? accountIds : transaction.desc)
+                    Text(transaction.desc.isEmpty ? accountIdsText : transaction.desc)
                         .font(.headline)
                         .lineLimit(1)
                     
@@ -196,7 +189,7 @@ private struct TransactionRowView: View {
                 }
                 
                 // Show accounts on second line
-                Text(accountIds)
+                Text(accountIdsText)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -220,10 +213,10 @@ private struct TransactionRowView: View {
 
             Spacer()
 
-            Text(displayAmount)
+            Text(amountString)
                 .font(.subheadline)
                 .fontWeight(.semibold)
-                .foregroundColor(amountColor)
+                .foregroundColor(color(for: type))
         }
         .padding(.vertical, 4)
     }

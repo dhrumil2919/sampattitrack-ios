@@ -122,25 +122,31 @@ struct LocalAccountPicker: View {
     }
     
     var body: some View {
-        List {
-            ForEach(sortedCategories, id: \.self) { category in
-                Section(header: Text(category)) {
-                    ForEach(groupedAccounts[category] ?? [], id: \.id) { account in
-                        Button(action: {
-                            selection = account.id
-                        }) {
-                            HStack {
-                                // Display ID which is in category:parent:name format
-                                Text(account.id)
-                                    .font(.body)
-                                Spacer()
-                                if selection == account.id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.blue)
+        Group {
+            if filteredAccounts.isEmpty && !searchText.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            } else {
+                List {
+                    ForEach(sortedCategories, id: \.self) { category in
+                        Section(header: Text(category)) {
+                            ForEach(groupedAccounts[category] ?? [], id: \.id) { account in
+                                Button(action: {
+                                    selection = account.id
+                                }) {
+                                    HStack {
+                                        // Display ID which is in category:parent:name format
+                                        Text(account.id)
+                                            .font(.body)
+                                        Spacer()
+                                        if selection == account.id {
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.blue)
+                                        }
+                                    }
                                 }
+                                .foregroundColor(.primary)
                             }
                         }
-                        .foregroundColor(.primary)
                     }
                 }
             }

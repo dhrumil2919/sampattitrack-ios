@@ -4,6 +4,24 @@ import Foundation
 /// DateFormatter initialization is expensive, so reusing instances is critical.
 struct DateFormatterCache {
 
+    // MARK: - API Response Formatters
+
+    /// Cached ISO8601 Date Formatter with Fractional Seconds
+    /// Options: [.withInternetDateTime, .withFractionalSeconds]
+    /// TimeZone: UTC (Default)
+    static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// Cached ISO8601 Date Formatter (Standard)
+    /// Options: Default (.withInternetDateTime)
+    /// TimeZone: UTC (Default)
+    static let iso8601Default: ISO8601DateFormatter = {
+        return ISO8601DateFormatter()
+    }()
+
     // MARK: - Standard Formatters
 
     /// Cached ISO8601 Date Formatter

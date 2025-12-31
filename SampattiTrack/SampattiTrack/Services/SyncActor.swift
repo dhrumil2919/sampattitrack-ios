@@ -723,11 +723,13 @@ actor SyncActor {
         print("[SyncActor] Upserting portfolio metrics for \(portfolio.count) accounts...")
         
         for item in portfolio {
+            #if DEBUG
             print("[SyncActor]   - Account: \(item.account_name)")
             print("[SyncActor]     XIRR: \(item.xirr)")
             print("[SyncActor]     Invested: \(item.invested_amount)")
             print("[SyncActor]     Current: \(item.current_value)")
             print("[SyncActor]     Return: \(item.absolute_return)")
+            #endif
             
             // Update cached XIRR and metrics in SDAccount
             let fetchDesc = FetchDescriptor<SDAccount>(
@@ -880,7 +882,9 @@ actor SyncActor {
             return
         }
         
+        #if DEBUG
         print("[SyncActor] Caching latest net worth: \(latest.net_worth) from \(latest.date)")
+        #endif
         
         // Store the latest value in UserDefaults for dashboard
         UserDefaults.standard.set(latest.net_worth, forKey: "cached_net_worth")
@@ -911,7 +915,9 @@ actor SyncActor {
         // Encode and store in UserDefaults
         if let encoded = try? JSONEncoder().encode(data) {
             UserDefaults.standard.set(encoded, forKey: "cached_tax_analysis")
+            #if DEBUG
             print("[SyncActor] Cached tax analysis: Total Tax = \(data.totalTax), Rate = \(data.taxRate)%")
+            #endif
         }
     }
     
@@ -937,7 +943,9 @@ actor SyncActor {
         // Encode and store in UserDefaults
         if let encoded = try? JSONEncoder().encode(data) {
             UserDefaults.standard.set(encoded, forKey: "cached_capital_gains")
+            #if DEBUG
             print("[SyncActor] Cached capital gains: STCG = \(data.totalSTCG), LTCG = \(data.totalLTCG), Total Tax = \(data.totalTax)")
+            #endif
         }
     }
     

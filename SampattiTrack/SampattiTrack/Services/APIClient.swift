@@ -90,7 +90,9 @@ final class APIClient: ObservableObject, @unchecked Sendable {
                 completion(.success(decoded))
             } catch {
                 // Sentinel: Do not log full response body as it may contain sensitive data
-                print("Decoding failed for endpoint: \(endpoint). Error: \(error)")
+                // We also sanitize the endpoint to remove query parameters which might contain PII
+                let safeEndpoint = endpoint.components(separatedBy: "?").first ?? endpoint
+                print("Decoding failed for endpoint: \(safeEndpoint). Error: \(error)")
                 completion(.failure(.decodingError(error)))
             }
         }.resume()
@@ -100,10 +102,19 @@ final class APIClient: ObservableObject, @unchecked Sendable {
     
     /// Lookup price for a specific unit code on a given date
     func lookupPrice(unitCode: String, date: String? = nil, completion: @escaping (Result<PriceLookupResponse, APIError>) -> Void) {
-        var endpoint = "/prices/lookup?unit_code=\(unitCode.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? unitCode)"
+        // Sentinel: Use URLComponents to prevent query parameter injection
+        var components = URLComponents(string: "/prices/lookup")
+        var queryItems = [URLQueryItem(name: "unit_code", value: unitCode)]
         if let date = date {
-            endpoint += "&date=\(date)"
+            queryItems.append(URLQueryItem(name: "date", value: date))
         }
+        components?.queryItems = queryItems
+
+        guard let endpoint = components?.string else {
+             completion(.failure(.invalidURL))
+             return
+        }
+
         request(endpoint, method: "GET", completion: completion)
     }
     
@@ -131,12 +142,16 @@ final class APIClient: ObservableObject, @unchecked Sendable {
     
     /// Update an existing tag
     func updateTag(id: String, _ tag: CreateTagRequest, completion: @escaping (Result<SingleTagResponse, APIError>) -> Void) {
-        request("/tags/\(id)", method: "PUT", body: tag, completion: completion)
+        // Sentinel: Encode path parameter to prevent traversal/injection
+        let safeId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        request("/tags/\(safeId)", method: "PUT", body: tag, completion: completion)
     }
     
     /// Delete a tag
     func deleteTag(id: String, completion: @escaping (Result<EmptyResponse, APIError>) -> Void) {
-        request("/tags/\(id)", method: "DELETE", completion: completion)
+        // Sentinel: Encode path parameter to prevent traversal/injection
+        let safeId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        request("/tags/\(safeId)", method: "DELETE", completion: completion)
     }
     
     // MARK: - Raw JSON Request (for offline queue)
