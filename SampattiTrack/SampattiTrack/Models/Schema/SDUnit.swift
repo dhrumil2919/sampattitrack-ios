@@ -4,7 +4,7 @@ import SwiftData
 /// SDUnit stores financial units locally for offline access.
 /// Units represent currencies or commodities (e.g., INR, USD, GOLD).
 @Model
-final class SDUnit {
+class SDUnit {
     /// Unique identifier for the unit (e.g., "INR", "USD", "ICICI_BLUECHIP")
     @Attribute(.unique) var code: String
     

@@ -13,6 +13,7 @@ class SDTag {
     var updatedAt: Date = Date()
 
     // Relationship
+    @Relationship(deleteRule: .nullify, inverse: \SDPosting.tags)
     var postings: [SDPosting]?
 
     init(id: String, name: String, desc: String? = nil, color: String? = nil, isSynced: Bool = true) {

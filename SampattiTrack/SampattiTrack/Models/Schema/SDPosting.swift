@@ -12,7 +12,6 @@ class SDPosting {
     
     var transaction: SDTransaction?
     
-    @Relationship(inverse: \SDTag.postings)
     var tags: [SDTag]?
 
     init(id: UUID = UUID(), accountID: String, accountName: String? = nil, amount: String, quantity: String? = nil, unitCode: String? = nil, tags: [SDTag]? = nil) {
