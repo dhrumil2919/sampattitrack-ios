@@ -113,6 +113,20 @@ class AddTransactionViewModel: ObservableObject {
     /// 3. Queue backend sync operation
     /// 4. Background sync happens asynchronously
     func createTransaction() {
+        // Sentinel: Sanitize and Validate inputs
+        description = SecurityUtils.sanitizeInput(description)
+        note = SecurityUtils.sanitizeInput(note)
+
+        guard SecurityUtils.isValidLength(description, maxLength: SecurityUtils.maxDescriptionLength) else {
+            errorMessage = "Description must be less than \(SecurityUtils.maxDescriptionLength) characters"
+            return
+        }
+
+        guard SecurityUtils.isValidLength(note, maxLength: SecurityUtils.maxNoteLength) else {
+            errorMessage = "Note must be less than \(SecurityUtils.maxNoteLength) characters"
+            return
+        }
+
         guard isBalanced else {
             errorMessage = "Transaction does not balance. Imbalance: \(CurrencyFormatter.formatCheck(abs(totalAmount)))"
             return

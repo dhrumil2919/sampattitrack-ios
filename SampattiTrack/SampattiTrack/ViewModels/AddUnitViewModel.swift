@@ -86,11 +86,30 @@ class AddUnitViewModel: ObservableObject {
     
     /// Create unit in LOCAL SwiftData - no API call
     func createUnit() {
+        // Sentinel: Sanitize and Validate inputs
+        code = SecurityUtils.sanitizeInput(code)
+        name = SecurityUtils.sanitizeInput(name)
+
         guard !code.isEmpty, !name.isEmpty else {
             errorMessage = "Code and Name are required"
             return
         }
         
+        guard SecurityUtils.isValidLength(code, maxLength: SecurityUtils.maxCodeLength) else {
+            errorMessage = "Code must be less than \(SecurityUtils.maxCodeLength) characters"
+            return
+        }
+
+        guard SecurityUtils.isValidLength(name, maxLength: SecurityUtils.maxNameLength) else {
+            errorMessage = "Name must be less than \(SecurityUtils.maxNameLength) characters"
+            return
+        }
+
+        guard SecurityUtils.isValidCode(code) else {
+            errorMessage = "Code contains invalid characters. Only alphanumeric and underscore allowed."
+            return
+        }
+
         guard let context = modelContext else {
             errorMessage = "Database not available"
             return
