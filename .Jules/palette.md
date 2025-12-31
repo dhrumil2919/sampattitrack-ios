@@ -1,7 +1,3 @@
-## 2024-05-23 - Filtered List Empty States
-**Learning:** Users can be confused when a filtered list returns no results if there is no feedback. A standard "empty list" state is often only triggered when the source data is empty, ignoring the filtered state.
-**Action:** Always check if the *filtered* dataset is empty. If so, provide context-aware feedback (e.g., "No Asset accounts found" or "No results for 'search'").
-
-## 2024-05-25 - Explaining Disabled States
-**Learning:** Simply disabling a primary action button (like "Save") without explanation frustrates users who believe they have completed the form.
-**Action:** When disabling a primary button, provide a footer or nearby helper text explaining *why* it is disabled (e.g., "Transaction must be balanced").
+## 2024-05-23 - Standardizing Empty States
+**Learning:** `ContentUnavailableView` (iOS 17+) significantly reduces boilerplate for empty states and search results compared to custom `VStack` implementations. It automatically handles layout, spacing, and system-standard styling, making the app feel more native.
+**Action:** Replace custom "No Data" or "No Results" VStacks with `ContentUnavailableView` wherever possible, especially for search results (`.search(text:)`).
