@@ -114,10 +114,29 @@ private struct TransactionListContent: View {
     private func deleteTransactions(offsets: IndexSet) {
         for index in offsets {
             let transaction = transactions[index]
-            // Mark as deleted for sync
-            transaction.isDeleted = true
-            transaction.isSynced = false
+            
+            // OFFLINE-FIRST: Queue DELETE operation for backend sync
+            do {
+                try OfflineQueueHelper.queueTransactionDelete(
+                    id: transaction.id,
+                    context: modelContext
+                )
+                print("[TransactionList] ✓ Queued deletion: \(transaction.desc)")
+            } catch {
+                print("[TransactionList] ✗ Failed to queue deletion: \(error)")
+                // Continue with local deletion even if queue fails
+            }
+            
+            // Delete from local SwiftData (includes cascade delete to postings)
             modelContext.delete(transaction)
+        }
+        
+        // Save local changes
+        do {
+            try modelContext.save()
+            print("[TransactionList] ✓ Local deletion saved")
+        } catch {
+            print("[TransactionList] ✗ Failed to save deletion: \(error)")
         }
     }
 }
