@@ -90,7 +90,7 @@ struct AccountListView: View {
                 .navigationTitle("Accounts")
                 .searchable(text: $searchText, prompt: "Search accounts...")
                 .refreshable {
-                    await syncManager.syncAll()
+                    await syncManager.syncTransactions()
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {

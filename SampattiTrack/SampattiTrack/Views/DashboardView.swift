@@ -241,6 +241,23 @@ struct DashboardView: View {
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         }
+
+                        // Backend Status & Last Sync
+                        if let lastSync = viewModel.syncManager?.lastSyncDate {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack(spacing: 4) {
+                                    Circle()
+                                        .fill(viewModel.syncManager?.backendStatus == .online ? Color.green : (viewModel.syncManager?.backendStatus == .offline ? Color.red : Color.gray))
+                                        .frame(width: 8, height: 8)
+                                    Text(viewModel.syncManager?.backendStatus == .online ? "Online" : "Offline")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Text("Synced: " + lastSync.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
                 }
                 
@@ -264,6 +281,16 @@ struct DashboardView: View {
                                 }
                             } label: {
                                 Label("Clear All & Re-sync", systemImage: "arrow.clockwise")
+                            }
+
+                            Divider()
+
+                            Menu("Sync Interval") {
+                                Button("30 seconds") { syncManager.updateSyncInterval(30) }
+                                Button("1 Minute") { syncManager.updateSyncInterval(60) }
+                                Button("5 Minutes") { syncManager.updateSyncInterval(300) }
+                                Button("15 Minutes") { syncManager.updateSyncInterval(900) }
+                                Button("Manual Only") { syncManager.updateSyncInterval(0) }
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
