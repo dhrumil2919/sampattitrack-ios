@@ -136,23 +136,68 @@ actor SyncActor {
     func performFullSync() async {
         print("[SyncActor] Starting full sync...")
         
+        // Push local changes
+        await pushLocalChanges()
+
+        // Pull all data
         do {
-            // Push local changes first (with retry logic)
-            try await pushLocalChanges()
+            try await pullTransactionalData()
+            try await pullDashboardData()
         } catch {
-            // OFFLINE-FIRST: Never block on push failures
-            print("[SyncActor] ⚠️ Push failed (non-blocking): \(error)")
+            print("[SyncActor] ⚠️ Full sync pull failed: \(error)")
         }
         
+        print("[SyncActor] Sync complete")
+    }
+
+    /// OFFLINE-FIRST: Push local queue (exposed for periodic sync)
+    func pushLocalChanges() async {
         do {
-            // Pull remote data
-            try await pullRemoteData()
+            try await _pushLocalChanges()
         } catch {
-            // OFFLINE-FIRST: Never block on pull failures
-            print("[SyncActor] ⚠️ Pull failed (non-blocking): \(error)")
+            print("[SyncActor] ⚠️ Push failed: \(error)")
         }
+    }
+
+    /// Pull only dashboard related metrics (lighter, for periodic sync)
+    func pullDashboardData() async throws {
+        print("[SyncActor] Fetching dashboard metrics...")
+
+        let portfolio = try await fetchPortfolioAnalysis()
+        let netWorthHistory = try await fetchNetWorthHistory()
+        let taxAnalysis = try await fetchTaxAnalysis()
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let capitalGains = try await fetchCapitalGains(year: currentYear)
+        let cashFlow = try await fetchCashFlow()
+        let portfolioAnalysis = try await fetchPortfolioAssets()
+
+        try upsertPortfolioXIRR(portfolio)
+        try cacheNetWorthHistory(netWorthHistory)
+        try cacheTaxData(taxAnalysis)
+        try cacheCapitalGains(capitalGains)
+        try cacheCashFlow(cashFlow)
+        try cachePortfolioAnalysis(portfolioAnalysis)
+
+        print("[SyncActor] Dashboard data updated")
+    }
+
+    /// Pull only transactional data (heavier, for user refresh)
+    func pullTransactionalData() async throws {
+        print("[SyncActor] Fetching transactional data...")
+
+        let tags = try await fetchTags()
+        let accounts = try await fetchAccounts()
+        let units = try await fetchUnits()
+        let transactions = try await fetchTransactions()
+        let prices = try await fetchPrices()
+
+        try upsertTags(tags)
+        try upsertAccounts(accounts)
+        try upsertUnits(units)
+        try upsertPrices(prices)
+        try upsertTransactions(transactions)
         
-        print("[SyncActor] Sync complete (errors are non-blocking)")
+        print("[SyncActor] Transactional data updated")
     }
     
     // MARK: - Debug Methods
@@ -196,11 +241,8 @@ actor SyncActor {
     
     // MARK: - Push Logic (Queue-Based with Exponential Backoff)
     
-    /// OFFLINE-FIRST: Process queued operations with exponential backoff
-    /// - Skips items that are still in backoff period
-    /// - Marks items as permanently failed after max retries
-    /// - Never throws errors (non-blocking)
-    private func pushLocalChanges() async throws {
+    /// Internal implementation of push logic
+    private func _pushLocalChanges() async throws {
         print("[SyncActor] Processing offline queue...")
         
         // Fetch pending and retrying queue items (exclude permanently failed)
@@ -415,46 +457,6 @@ actor SyncActor {
         }
         tx.isSynced = true
         try modelContext.save()
-    }
-    
-    // MARK: - Pull Logic (Individual Endpoints)
-    
-    private func pullRemoteData() async throws {
-        print("[SyncActor] Fetching remote data from individual endpoints...")
-        
-        // Fetch from individual endpoints
-        let tags = try await fetchTags()
-        let accounts = try await fetchAccounts()
-        let units = try await fetchUnits()
-        let transactions = try await fetchTransactions()
-        let prices = try await fetchPrices()
-        let portfolio = try await fetchPortfolioAnalysis()
-        let netWorthHistory = try await fetchNetWorthHistory()
-        
-        // Fetch tax and capital gains data
-        let taxAnalysis = try await fetchTaxAnalysis()
-        let currentYear = Calendar.current.component(.year, from: Date())
-        let capitalGains = try await fetchCapitalGains(year: currentYear)
-        let cashFlow = try await fetchCashFlow()
-        let portfolioAnalysis = try await fetchPortfolioAssets()
-        
-        print("[SyncActor] Upserting data (incremental sync)...")
-        // Use upsert instead of delete-all to prevent data invalidation
-        try upsertTags(tags)
-        try upsertAccounts(accounts)
-        try upsertUnits(units)
-        try upsertPrices(prices)
-        try upsertPortfolioXIRR(portfolio)
-        try cacheNetWorthHistory(netWorthHistory)
-        try upsertTransactions(transactions)
-        
-        // Cache tax and capital gains data
-        try cacheTaxData(taxAnalysis)
-        try cacheCapitalGains(capitalGains)
-        try cacheCashFlow(cashFlow)
-        try cachePortfolioAnalysis(portfolioAnalysis)
-        
-        print("[SyncActor] Pull complete")
     }
     
     // MARK: - Individual Fetch Methods

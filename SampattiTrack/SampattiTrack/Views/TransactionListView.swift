@@ -20,7 +20,7 @@ struct TransactionListView: View {
             }
             .searchable(text: $searchText, prompt: "Search transactions...")
             .refreshable {
-                await syncManager.syncAll()
+                await syncManager.syncTransactions()
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
