@@ -46,36 +46,25 @@ struct AccountListView: View {
                     .padding()
                     
                     if accounts.isEmpty {
-                        // Show loader or placeholder if we have no local data yet?
-                        // If we have no data, we probably need to sync.
-                         VStack {
-                             Spacer()
-                             Text("No accounts found")
-                             Button("Sync Accounts") {
-                                 Task {
-                                     await syncManager.syncAll()
-                                 }
-                             }
-                             Spacer()
-                         }
-                    } else if filteredAccounts.isEmpty {
-                        VStack(spacing: 12) {
-                            Spacer()
-                            Image(systemName: "magnifyingglass")
-                                .font(.largeTitle)
-                                .foregroundColor(.secondary)
-                            Text("No accounts found")
-                                .font(.headline)
-                            if !searchText.isEmpty {
-                                Text("No results for \"\(searchText)\"")
-                                    .foregroundColor(.secondary)
-                            } else {
-                                Text("You have no \(selectedCategory.rawValue.lowercased()) accounts.")
-                                    .foregroundColor(.secondary)
+                        ContentUnavailableView {
+                            Label("No Accounts", systemImage: "folder.badge.questionmark")
+                        } description: {
+                            Text("No accounts found on this device.")
+                        } actions: {
+                            Button("Sync Accounts") {
+                                Task { await syncManager.syncAll() }
                             }
-                            Spacer()
                         }
-                        .padding()
+                    } else if filteredAccounts.isEmpty {
+                        if !searchText.isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                        } else {
+                            ContentUnavailableView {
+                                Label("No \(selectedCategory.rawValue) Accounts", systemImage: "folder")
+                            } description: {
+                                Text("You don't have any accounts in this category yet.")
+                            }
+                        }
                     } else {
                         List {
                             ForEach(filteredAccounts) { account in
