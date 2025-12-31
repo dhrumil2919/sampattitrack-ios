@@ -204,7 +204,6 @@ actor SyncActor {
         print("[SyncActor] Processing offline queue...")
         
         // Fetch pending and retrying queue items (exclude permanently failed)
-        // Note: SwiftData predicates require string literals, not enum rawValues
         let queueDescriptor = FetchDescriptor<SyncQueueItem>(
             predicate: #Predicate { item in
                 item.syncStatus == "pending" ||
@@ -222,8 +221,8 @@ actor SyncActor {
         
         print("[SyncActor] Found \(queueItems.count) queued operations")
         
-        let maxRetries = 10 // Permanent failure threshold
-        var processedCount = 0
+        let maxRetries = 10
+        var successfulItemIDs: [UUID] = []  // Track UUIDs of successful items
         
         for item in queueItems {
             // OFFLINE-FIRST: Check if item can retry (exponential backoff)
@@ -237,7 +236,6 @@ actor SyncActor {
             if item.retryCount >= maxRetries {
                 print("[SyncActor] ✗ Permanently failed: \(item.operationType) (exceeded \(maxRetries) retries)")
                 item.status = .failed
-                try modelContext.save()
                 continue
             }
             
@@ -248,24 +246,59 @@ actor SyncActor {
             let success = await processQueueItem(item)
             
             if success {
-                // OFFLINE-FIRST: Mark as succeeded and delete from queue
-                print("[SyncActor] ✓ Synced: \(item.operationType)")
-                modelContext.delete(item)
-                try modelContext.save()
-                processedCount += 1
+                print("[SyncActor] ✓ Synced: \(item.operationType) (ID: \(item.id))")
+                successfulItemIDs.append(item.id)
             } else {
-                // OFFLINE-FIRST: Increment retry, set status to retrying
                 item.retryCount += 1
                 item.status = .retrying
-                try modelContext.save()
                 
                 let nextRetryIn = item.backoffDelaySeconds
                 print("[SyncActor] ✗ Failed: \(item.operationType) (retry \(item.retryCount)/\(maxRetries), next in \(Int(nextRetryIn))s)")
             }
         }
         
-        if processedCount > 0 {
-            print("[SyncActor] Successfully synced \(processedCount) operations")
+        // CRITICAL: Use SwiftData's batch delete API (same as clearAllLocalData)
+        // This is the ONLY deletion method that works reliably in actor contexts
+        if !successfulItemIDs.isEmpty {
+            print("[SyncActor] 🗑️ Batch deleting \(successfulItemIDs.count) successfully synced items using delete API...")
+            
+            // Delete using predicate - this uses SwiftData's internal batch delete
+            let idsToDelete = successfulItemIDs
+            try modelContext.delete(model: SyncQueueItem.self, where: #Predicate { item in
+                idsToDelete.contains(item.id)
+            })
+            
+            // CRITICAL: Must save after batch delete (same as clearAllLocalData does)
+            try modelContext.save()
+            
+            print("[SyncActor] ✓ Batch deleted and saved \(successfulItemIDs.count) queue items")
+            
+            // WORKAROUND: Backend generates its own transaction IDs instead of using client UUID
+            // Mark local as synced for now - pull will handle deduplication
+            // TODO: Fix backend to accept and use client UUID for proper offline-first support
+            let unsyncedTxDesc = FetchDescriptor<SDTransaction>(
+                predicate: #Predicate { $0.isSynced == false }
+            )
+            let unsyncedTransactions = try modelContext.fetch(unsyncedTxDesc)
+            
+            if !unsyncedTransactions.isEmpty {
+                print("[SyncActor]   Marking \(unsyncedTransactions.count) local transactions as synced...")
+                for tx in unsyncedTransactions {
+                    tx.isSynced = true
+                }
+                try modelContext.save()
+                print("[SyncActor]   ✓ Marked as synced - pull will deduplicate")
+            }
+        }
+        
+        // Save status updates for failed/retrying items
+        if successfulItemIDs.count < queueItems.count {
+            do {
+                try modelContext.save()
+                print("[SyncActor] ✓ Saved status updates for remaining queue items")
+            } catch {
+                print("[SyncActor] ✗ Failed to save status updates: \(error)")
+            }
         }
     }
     

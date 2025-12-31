@@ -1,9 +1,5 @@
-# Bolt's Journal
+# Bolt's Journal - Critical Learnings
 
-## 2024-05-23 - Initial Setup
-**Learning:** Performance requires measurement.
-**Action:** Establish a baseline before optimizing.
-
-## 2024-05-23 - Currency Formatter Optimization
-**Learning:** `NumberFormatter` creation is expensive and often done inside SwiftUI View `body`. Caching the default instance can significantly reduce overhead on the main thread.
-**Action:** Check for expensive object creations (Formatters, Calendars) inside View updates and cache them.
+## 2024-05-22 - [Example Entry]
+**Learning:** This is an example entry to initialize the journal.
+**Action:** Replace with real learnings as they occur.
