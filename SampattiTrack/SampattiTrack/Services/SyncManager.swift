@@ -29,15 +29,31 @@ class SyncManager: ObservableObject {
         }
     }
     
-    /// Starts periodic background sync (every 60s)
+    /// Starts periodic background sync (interval configurable via UserDefaults, default 60s)
     func startPeriodicSync() {
         stopPeriodicSync()
-        print("[SyncManager] Starting periodic sync (60s interval)")
-        periodicTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+
+        // Check if key exists; if not, default to 60. If it exists, use value (0 means manual).
+        let storedInterval = UserDefaults.standard.object(forKey: "sync_interval_seconds") as? Double
+        let effectiveInterval = storedInterval ?? 60.0
+
+        if effectiveInterval <= 0 {
+            print("[SyncManager] Periodic sync disabled (Manual Mode)")
+            return
+        }
+
+        print("[SyncManager] Starting periodic sync (\(Int(effectiveInterval))s interval)")
+        periodicTimer = Timer.scheduledTimer(withTimeInterval: effectiveInterval, repeats: true) { [weak self] _ in
             Task {
                 await self?.performPeriodicSync()
             }
         }
+    }
+
+    /// Updates the sync interval and restarts the timer
+    func updateSyncInterval(_ interval: TimeInterval) {
+        UserDefaults.standard.set(interval, forKey: "sync_interval_seconds")
+        startPeriodicSync()
     }
 
     func stopPeriodicSync() {

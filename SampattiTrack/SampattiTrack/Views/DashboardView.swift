@@ -282,6 +282,16 @@ struct DashboardView: View {
                             } label: {
                                 Label("Clear All & Re-sync", systemImage: "arrow.clockwise")
                             }
+
+                            Divider()
+
+                            Menu("Sync Interval") {
+                                Button("30 seconds") { syncManager.updateSyncInterval(30) }
+                                Button("1 Minute") { syncManager.updateSyncInterval(60) }
+                                Button("5 Minutes") { syncManager.updateSyncInterval(300) }
+                                Button("15 Minutes") { syncManager.updateSyncInterval(900) }
+                                Button("Manual Only") { syncManager.updateSyncInterval(0) }
+                            }
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
