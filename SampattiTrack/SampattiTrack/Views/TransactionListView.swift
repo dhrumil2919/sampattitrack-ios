@@ -178,8 +178,10 @@ private struct TransactionRowView: View {
             amountString = "\(prefix)\(CurrencyFormatter.formatCheck(abs(amount)))"
         } else {
             // In global context
-            type = transaction.determineType()
-            amountString = CurrencyFormatter.formatCheck(transaction.displayAmount)
+            // OPTIMIZATION: Use single-pass calculation for both type and amount
+            let details = transaction.calculateDisplayDetails()
+            type = details.type
+            amountString = CurrencyFormatter.formatCheck(details.amount)
         }
 
         // 2. Compute account IDs string (avoids relationship traversal and string joining)

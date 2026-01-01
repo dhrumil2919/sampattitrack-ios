@@ -14,15 +14,7 @@ extension SDPosting {
 extension SDTransaction {
 
     var displayAmount: Double {
-        // Simple heuristic: Sum of positive amounts
-        guard let postings = postings else { return 0 }
-
-        return postings.reduce(0) { result, posting in
-            if let amount = Double(posting.amount), amount > 0 {
-                return result + amount
-            }
-            return result
-        }
+        return calculateDisplayDetails().amount
     }
 
     func amountForAccount(_ accountID: String) -> Double {
@@ -36,20 +28,30 @@ extension SDTransaction {
 
     // Reuse Transaction.TransactionType
     func determineType() -> Transaction.TransactionType {
-        guard let postings = postings, !postings.isEmpty else { return .transfer }
+        return calculateDisplayDetails().type
+    }
 
-        // OPTIMIZATION: Single pass to find max and min postings.
-        // Previously used .max(by:) and .min(by:) which iterated twice and performed O(4N) string conversions.
-        // This reduces it to O(N) string conversions.
+    /// OPTIMIZATION: Calculates both type and display amount in a single pass.
+    /// Reduces complexity from O(2N) to O(N) for list rendering where both are needed.
+    func calculateDisplayDetails() -> (type: Transaction.TransactionType, amount: Double) {
+        guard let postings = postings, !postings.isEmpty else { return (.transfer, 0) }
 
         var maxPosting: SDPosting?
         var minPosting: SDPosting?
         var maxVal = -Double.greatestFiniteMagnitude
         var minVal = Double.greatestFiniteMagnitude
+        var positiveSum: Double = 0
 
+        // Single pass to gather all necessary data
         for posting in postings {
             let val = Double(posting.amount) ?? 0.0
 
+            // Accumulate positive amount for display
+            if val > 0 {
+                positiveSum += val
+            }
+
+            // Track max/min for type determination
             if val > maxVal {
                 maxVal = val
                 maxPosting = posting
@@ -61,41 +63,44 @@ extension SDTransaction {
             }
         }
 
-        guard let maxP = maxPosting, let minP = minPosting else { return .transfer }
+        guard let maxP = maxPosting, let minP = minPosting else { return (.transfer, positiveSum) }
 
         let maxCategory = maxP.category
         let minCategory = minP.category
+        let type: Transaction.TransactionType
 
         // Apply rules based on max and min categories
         switch maxCategory {
         case "Expenses", "Expense":
-            return .expense
+            type = .expense
 
         case "Assets", "Asset":
             switch minCategory {
             case "Assets", "Asset", "Liabilities", "Liability":
-                return .transfer
+                type = .transfer
             case "Income":
-                return .income
+                type = .income
             default:
-                return .income
+                type = .income
             }
 
         case "Liabilities", "Liability":
             switch minCategory {
             case "Income":
-                return .income
+                type = .income
             case "Assets", "Asset":
-                return .expense
+                type = .expense
             default:
-                return .transfer
+                type = .transfer
             }
 
         case "Income":
-            return .income
+            type = .income
 
         default:
-            return .transfer
+            type = .transfer
         }
+
+        return (type, positiveSum)
     }
 }
