@@ -74,6 +74,13 @@ struct ConfigurationView: View {
             return
         }
 
+        // Sentinel: Enforce strict scheme validation to prevent SSRF/Injection
+        let validSchemes = ["http", "https"]
+        guard validSchemes.contains(scheme.lowercased()) else {
+            validationError = "Invalid protocol. Only HTTP and HTTPS are allowed."
+            return
+        }
+
         // Security Check: HTTP vs HTTPS
         if scheme.lowercased() == "http" {
             // Allow localhost/private IPs without warning, but warn for public HTTP

@@ -13,6 +13,12 @@ class LoginViewModel: ObservableObject {
             return
         }
         
+        // Sentinel: Prevent DoS with large payloads
+        guard username.count <= 100, password.count <= 100 else {
+            errorMessage = "Username or password too long (max 100 characters)"
+            return
+        }
+
         isLoading = true
         errorMessage = nil
         
