@@ -14,22 +14,16 @@ struct TagListView: View {
         NavigationView {
             Group {
                 if tags.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "tag.slash")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No Tags")
-                            .font(.headline)
+                    ContentUnavailableView {
+                        Label("No Tags", systemImage: "tag.slash")
+                    } description: {
                         Text("Create tags to categorize your transactions")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
+                    } actions: {
                         Button("Create Tag") {
                             showingCreateSheet = true
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                    .padding()
                 } else {
                     List {
                         ForEach(tags) { tag in
