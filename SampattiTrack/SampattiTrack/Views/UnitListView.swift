@@ -11,12 +11,20 @@ struct UnitListView: View {
         NavigationView {
             Group {
                 if units.isEmpty {
-                    VStack {
-                        Text("No units found")
+                    ContentUnavailableView {
+                        Label("No Units", systemImage: "scalemass")
+                    } description: {
+                        Text("Units are synchronized from the server, or you can create one locally.")
+                    } actions: {
                         Button("Sync Now") {
                             Task {
                                 await syncManager.syncAll()
                             }
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        NavigationLink(destination: AddUnitView()) {
+                            Text("Create Unit")
                         }
                     }
                 } else {
