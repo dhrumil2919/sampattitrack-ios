@@ -95,6 +95,7 @@ class DashboardCalculator {
     // to avoid repetitive string-to-double conversions and array iterations.
     private struct CachedTransaction {
         let date: String
+        let monthKey: String
         let type: Transaction.TransactionType
         let displayAmount: Double
         let assetImpact: Double
@@ -151,6 +152,7 @@ class DashboardCalculator {
 
             return CachedTransaction(
                 date: tx.date,
+                monthKey: String(tx.date.prefix(7)), // Pre-calculate YYYY-MM
                 type: type,
                 displayAmount: displayAmount,
                 assetImpact: assetImpact,
@@ -308,7 +310,7 @@ class DashboardCalculator {
         }
 
         // Group by Month (YYYY-MM) for cleaner history
-        let grouped = Dictionary(grouping: rangeTransactions) { String($0.date.prefix(7)) } // YYYY-MM
+        let grouped = Dictionary(grouping: rangeTransactions) { $0.monthKey }
         let sortedMonths = grouped.keys.sorted()
 
         // Add start point
@@ -409,8 +411,7 @@ class DashboardCalculator {
             guard tx.date >= startStr && tx.date <= endStr else { continue }
             guard tx.type == .expense else { continue }
             
-            let month = String(tx.date.prefix(7)) // YYYY-MM
-            monthlyData[month, default: 0] += tx.displayAmount
+            monthlyData[tx.monthKey, default: 0] += tx.displayAmount
         }
         
         return monthlyData.sorted { $0.key < $1.key }.map { (month: $0.key, amount: $0.value) }
@@ -427,8 +428,7 @@ class DashboardCalculator {
             guard tx.date >= startStr && tx.date <= endStr else { continue }
             guard tx.type == .income else { continue }
             
-            let month = String(tx.date.prefix(7)) // YYYY-MM
-            monthlyData[month, default: 0] += tx.displayAmount
+            monthlyData[tx.monthKey, default: 0] += tx.displayAmount
         }
         
         return monthlyData.sorted { $0.key < $1.key }.map { (month: $0.key, amount: $0.value) }
@@ -556,7 +556,7 @@ class DashboardCalculator {
             }
         }
 
-        let grouped = Dictionary(grouping: rangeTransactions) { String($0.date.prefix(7)) }
+        let grouped = Dictionary(grouping: rangeTransactions) { $0.monthKey }
         let sortedMonths = grouped.keys.sorted()
         
         history.append(NetWorthDataPoint(date: startStr, assets: "0", liabilities: "0", netWorth: String(currentNetWorth)))
