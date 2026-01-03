@@ -167,7 +167,7 @@ struct DashboardView: View {
                         }
                         
                         if let capitalGains = viewModel.capitalGains {
-                            NavigationLink(destination: CapitalGainsDetailView(capitalGains: capitalGains)) {
+                            NavigationLink(destination: CapitalGainsDetailView(capitalGains: capitalGains, history: viewModel.capitalGainsHistory)) {
                                 CapitalGainsCard(capitalGains: capitalGains)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -615,13 +615,20 @@ struct TaxCard: View {
             
             HStack(spacing: 12) {
                 VStack(alignment: .leading) {
-                    Text("Total Tax Paid")
+                    Text("Current FY Tax")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Text(CurrencyFormatter.format(taxAnalysis.totalTax))
-                        .font(.title3)
-                        .fontWeight(.bold)
-                        .foregroundColor(.purple)
+                    if !taxAnalysis.breakdown.isEmpty, let latest = taxAnalysis.breakdown.last {
+                        Text(CurrencyFormatter.format(latest.taxPaid))
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.purple)
+                    } else {
+                        Text(CurrencyFormatter.format("0"))
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.purple)
+                    }
                 }
                 
                 Spacer()
@@ -637,11 +644,20 @@ struct TaxCard: View {
                 }
             }
             
-            if !taxAnalysis.breakdown.isEmpty,let latest = taxAnalysis.breakdown.last {
-                Divider()
-                Text("FY \(latest.year-1)-\(latest.year % 100): ₹\(CurrencyFormatter.format(latest.taxPaid)) on ₹\(CurrencyFormatter.format(latest.income))")
+            Divider()
+
+            HStack {
+                Text("Total Tax Paid: \(CurrencyFormatter.format(taxAnalysis.totalTax))")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Spacer()
+
+                if !taxAnalysis.breakdown.isEmpty, let latest = taxAnalysis.breakdown.last {
+                     Text("FY \(latest.year)-\((latest.year + 1) % 100)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding()
@@ -660,7 +676,7 @@ struct CapitalGainsCard: View {
             HStack {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .foregroundColor(.orange)
-                Text("Capital Gains (FY \(capitalGains.year-1)-\(capitalGains.year % 100))")
+                Text("Capital Gains (FY \(String(capitalGains.year))-\(String((capitalGains.year + 1) % 100)))")
                     .font(.headline)
             }
             

@@ -75,14 +75,14 @@ struct TaxDetailView: View {
                         
                         Chart(taxAnalysis.breakdown) { item in
                             LineMark(
-                                x: .value("Year", "FY \(item.year % 100)"),
+                                x: .value("Year", "FY \(String((item.year + 1) % 100))"),
                                 y: .value("Rate", item.taxRate)
                             )
                             .foregroundStyle(.purple)
                             .symbol(.circle)
                             
                             PointMark(
-                                x: .value("Year", "FY \(item.year % 100)"),
+                                x: .value("Year", "FY \(String((item.year + 1) % 100))"),
                                 y: .value("Rate", item.taxRate)
                             )
                             .foregroundStyle(.purple)
@@ -112,7 +112,7 @@ struct TaxDetailView: View {
                     ForEach(taxAnalysis.breakdown.reversed()) { item in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("FY \(item.year-1)-\(item.year % 100)")
+                                Text("FY \(String(item.year))-\(String((item.year + 1) % 100))")
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                 Spacer()
