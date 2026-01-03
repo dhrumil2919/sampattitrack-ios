@@ -4,14 +4,39 @@ import Charts
 // Capital Gains Detail View - Shows STCG/LTCG breakdown and records
 struct CapitalGainsDetailView: View {
     let capitalGains: CapitalGainsReport
+    var history: [CapitalGainsReport] = []
+
+    @State private var selectedYearReport: CapitalGainsReport?
+
+    var activeReport: CapitalGainsReport {
+        selectedYearReport ?? capitalGains
+    }
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // Summary Card
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("FY \(capitalGains.year-1)-\(capitalGains.year % 100)")
-                        .font(.headline)
+                    HStack {
+                        Text("FY \(String(activeReport.year))-\(String((activeReport.year + 1) % 100))")
+                            .font(.headline)
+
+                        Spacer()
+
+                        // Year Picker if history is available
+                        if !history.isEmpty {
+                            Menu {
+                                ForEach(history) { report in
+                                    Button("FY \(String(report.year))-\(String((report.year + 1) % 100))") {
+                                        selectedYearReport = report
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "calendar")
+                                    .foregroundColor(.purple)
+                            }
+                        }
+                    }
                     
                     // STCG and LTCG Summary
                     HStack(spacing: 16) {
@@ -19,11 +44,11 @@ struct CapitalGainsDetailView: View {
                             Text("Short-Term (STCG)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(CurrencyFormatter.format(capitalGains.totalSTCG))
+                            Text(CurrencyFormatter.format(activeReport.totalSTCG))
                                 .font(.title3)
                                 .fontWeight(.bold)
-                                .foregroundColor(capitalGains.totalSTCGValue >= 0 ? .green : .red)
-                            Text("Tax: \(CurrencyFormatter.format(capitalGains.totalSTCGTax))")
+                                .foregroundColor(activeReport.totalSTCGValue >= 0 ? .green : .red)
+                            Text("Tax: \(CurrencyFormatter.format(activeReport.totalSTCGTax))")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         }
@@ -35,11 +60,11 @@ struct CapitalGainsDetailView: View {
                             Text("Long-Term (LTCG)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(CurrencyFormatter.format(capitalGains.totalLTCG))
+                            Text(CurrencyFormatter.format(activeReport.totalLTCG))
                                 .font(.title3)
                                 .fontWeight(.bold)
-                                .foregroundColor(capitalGains.totalLTCGValue >= 0 ? .green : .red)
-                            Text("Tax: \(CurrencyFormatter.format(capitalGains.totalLTCGTax))")
+                                .foregroundColor(activeReport.totalLTCGValue >= 0 ? .green : .red)
+                            Text("Tax: \(CurrencyFormatter.format(activeReport.totalLTCGTax))")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                         }
@@ -53,7 +78,7 @@ struct CapitalGainsDetailView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text(CurrencyFormatter.format(capitalGains.totalTax))
+                        Text(CurrencyFormatter.format(activeReport.totalTax))
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.orange)
@@ -72,7 +97,7 @@ struct CapitalGainsDetailView: View {
                         
                         Chart {
                             SectorMark(
-                                angle: .value("Amount", abs(capitalGains.totalSTCGValue)),
+                                angle: .value("Amount", abs(activeReport.totalSTCGValue)),
                                 innerRadius: .ratio(0.6),
                                 angularInset: 2
                             )
@@ -85,7 +110,7 @@ struct CapitalGainsDetailView: View {
                             }
                             
                             SectorMark(
-                                angle: .value("Amount", abs(capitalGains.totalLTCGValue)),
+                                angle: .value("Amount", abs(activeReport.totalLTCGValue)),
                                 innerRadius: .ratio(0.6),
                                 angularInset: 2
                             )
@@ -104,14 +129,59 @@ struct CapitalGainsDetailView: View {
                     .cornerRadius(12)
                     .shadow(color: .black.opacity(0.05), radius: 5)
                 }
+
+                // Yearly Breakdown (History)
+                if !history.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Yearly Breakdown")
+                            .font(.headline)
+
+                        ForEach(history) { report in
+                             Button {
+                                selectedYearReport = report
+                             } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("FY \(String(report.year))-\(String((report.year + 1) % 100))")
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Text(CurrencyFormatter.format(report.totalTax))
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(.orange)
+                                    }
+
+                                    HStack {
+                                        Text("STCG: \(CurrencyFormatter.format(report.totalSTCG))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                        Text("LTCG: \(CurrencyFormatter.format(report.totalLTCG))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Divider()
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.05), radius: 5)
+                }
                 
                 // Transaction Records
-                if !capitalGains.records.isEmpty {
+                if !activeReport.records.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Transaction Records (\(capitalGains.records.count))")
+                        Text("Transaction Records (\(activeReport.records.count))")
                             .font(.headline)
                         
-                        ForEach(capitalGains.records) { record in
+                        ForEach(activeReport.records) { record in
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {

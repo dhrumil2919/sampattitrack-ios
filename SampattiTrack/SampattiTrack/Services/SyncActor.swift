@@ -166,15 +166,27 @@ actor SyncActor {
         let portfolio = try await fetchPortfolioAnalysis()
         let netWorthHistory = try await fetchNetWorthHistory()
         let taxAnalysis = try await fetchTaxAnalysis()
+
+        // Fetch capital gains for current and past 2 years
         let currentYear = Calendar.current.component(.year, from: Date())
-        let capitalGains = try await fetchCapitalGains(year: currentYear)
+        var capitalGainsHistory: [CapitalGainsReport] = []
+
+        // Fetch last 3 years
+        for year in (currentYear-2)...currentYear {
+             if let report = try? await fetchCapitalGains(year: year) {
+                 capitalGainsHistory.append(report)
+             }
+        }
+        // Sort descending (latest first)
+        capitalGainsHistory.sort { $0.year > $1.year }
+
         let cashFlow = try await fetchCashFlow()
         let portfolioAnalysis = try await fetchPortfolioAssets()
 
         try upsertPortfolioXIRR(portfolio)
         try cacheNetWorthHistory(netWorthHistory)
         try cacheTaxData(taxAnalysis)
-        try cacheCapitalGains(capitalGains)
+        try cacheCapitalGainsHistory(capitalGainsHistory)
         try cacheCashFlow(cashFlow)
         try cachePortfolioAnalysis(portfolioAnalysis)
 
@@ -972,14 +984,16 @@ actor SyncActor {
         }
     }
     
-    private func cacheCapitalGains(_ data: CapitalGainsReport) throws {
-        print("[SyncActor] Caching capital gains data for year \(data.year)...")
+    private func cacheCapitalGainsHistory(_ data: [CapitalGainsReport]) throws {
+        print("[SyncActor] Caching capital gains history (\(data.count) years)...")
         
         // Encode and store in UserDefaults
         if let encoded = try? JSONEncoder().encode(data) {
-            UserDefaults.standard.set(encoded, forKey: "cached_capital_gains")
+            UserDefaults.standard.set(encoded, forKey: "cached_capital_gains_history")
             #if DEBUG
-            print("[SyncActor] Cached capital gains: STCG = \(data.totalSTCG), LTCG = \(data.totalLTCG), Total Tax = \(data.totalTax)")
+            if let latest = data.first {
+                print("[SyncActor] Cached capital gains (latest \(latest.year)): STCG = \(latest.totalSTCG), LTCG = \(latest.totalLTCG)")
+            }
             #endif
         }
     }

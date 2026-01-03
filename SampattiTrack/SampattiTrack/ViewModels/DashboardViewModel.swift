@@ -47,6 +47,7 @@ class DashboardViewModel: ObservableObject {
     // Tax and Capital Gains data
     @Published var taxAnalysis: TaxAnalysis?
     @Published var capitalGains: CapitalGainsReport?
+    @Published var capitalGainsHistory: [CapitalGainsReport] = []
     @Published var cashFlowData: [CashFlowDataPoint] = []
     @Published var portfolioAssets: [AssetPerformance] = []
     
@@ -291,10 +292,18 @@ class DashboardViewModel: ObservableObject {
                 }
                 
                 // Load cached capital gains
-                if let cgData = UserDefaults.standard.data(forKey: "cached_capital_gains"),
+                // Try history first (new format)
+                if let cgHistoryData = UserDefaults.standard.data(forKey: "cached_capital_gains_history"),
+                   let cgHistory = try? JSONDecoder().decode([CapitalGainsReport].self, from: cgHistoryData) {
+                    self.capitalGainsHistory = cgHistory
+                    self.capitalGains = cgHistory.first // Latest year
+                    print("[Dashboard] Loaded cached capital gains history (\(cgHistory.count) years)")
+                } else if let cgData = UserDefaults.standard.data(forKey: "cached_capital_gains"),
                    let cg = try? JSONDecoder().decode(CapitalGainsReport.self, from: cgData) {
+                    // Fallback to old single object cache
                     self.capitalGains = cg
-                    print("[Dashboard] Loaded cached capital gains for year \(cg.year)")
+                    self.capitalGainsHistory = [cg]
+                    print("[Dashboard] Loaded cached single capital gains for year \(cg.year)")
                 }
                 
                 // Store cash flow data
