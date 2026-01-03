@@ -43,7 +43,25 @@ struct DateRange {
     static func ytd() -> DateRange {
         let calendar = Calendar.current
         let now = Date()
-        let start = calendar.date(from: calendar.dateComponents([.year], from: now))!
+
+        // Get configured start month (default: 4 for April)
+        let startMonth = UserDefaults.standard.integer(forKey: "financial_year_start_month")
+        let fyStartMonth = startMonth > 0 ? startMonth : 4
+
+        let currentYear = calendar.component(.year, from: now)
+        let currentMonth = calendar.component(.month, from: now)
+
+        // If current month is before FY start month, FY started in previous year
+        // e.g., If now is Feb 2025 and FY starts in April, start date is April 1, 2024
+        let startYear = currentMonth < fyStartMonth ? currentYear - 1 : currentYear
+
+        var components = DateComponents()
+        components.year = startYear
+        components.month = fyStartMonth
+        components.day = 1
+
+        let start = calendar.date(from: components) ?? calendar.date(from: calendar.dateComponents([.year], from: now))!
+
         return DateRange(start: start, end: now, name: "YTD")
     }
 
