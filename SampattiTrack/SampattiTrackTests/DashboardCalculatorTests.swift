@@ -24,15 +24,18 @@ final class DashboardCalculatorTests: XCTestCase {
     func testCachedTransactionMonthKeyOptimization() throws {
         // Create sample transactions
         let tx1 = SDTransaction(date: "2023-01-15", desc: "Expense 1")
-        let p1 = SDPosting(transaction: tx1, accountID: "Expenses:Food", amount: "100.0")
+        let p1 = SDPosting(accountID: "Expenses:Food", amount: "100.0")
+        p1.transaction = tx1
         tx1.postings = [p1]
 
         let tx2 = SDTransaction(date: "2023-01-20", desc: "Income 1")
-        let p2 = SDPosting(transaction: tx2, accountID: "Income:Salary", amount: "1000.0")
+        let p2 = SDPosting(accountID: "Income:Salary", amount: "1000.0")
+        p2.transaction = tx2
         tx2.postings = [p2]
 
         let tx3 = SDTransaction(date: "2023-02-10", desc: "Expense 2")
-        let p3 = SDPosting(transaction: tx3, accountID: "Expenses:Rent", amount: "500.0")
+        let p3 = SDPosting(accountID: "Expenses:Rent", amount: "500.0")
+        p3.transaction = tx3
         tx3.postings = [p3]
 
         modelContext.insert(tx1)
