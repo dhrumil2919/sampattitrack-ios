@@ -168,11 +168,20 @@ actor SyncActor {
         let taxAnalysis = try await fetchTaxAnalysis()
 
         // Fetch capital gains for current and past 2 years
-        let currentYear = Calendar.current.component(.year, from: Date())
+        // Calculate current financial year based on configured start month (default April)
+        let startMonth = UserDefaults.standard.integer(forKey: "financial_year_start_month")
+        let fyStartMonth = startMonth == 0 ? 4 : startMonth
+
+        let date = Date()
+        let calendar = Calendar.current
+        let month = calendar.component(.month, from: date)
+        let year = calendar.component(.year, from: date)
+
+        let financialYear = month < fyStartMonth ? year - 1 : year
         var capitalGainsHistory: [CapitalGainsReport] = []
 
         // Fetch last 3 years
-        for year in (currentYear-2)...currentYear {
+        for year in (financialYear-2)...financialYear {
              if let report = try? await fetchCapitalGains(year: year) {
                  capitalGainsHistory.append(report)
              }
