@@ -2,6 +2,12 @@ import SwiftUI
 
 struct LoginView: View {
     @StateObject private var viewModel = LoginViewModel()
+    @FocusState private var focusedField: Field?
+
+    enum Field: Hashable {
+        case username
+        case password
+    }
     
     var body: some View {
         NavigationView {
@@ -15,12 +21,15 @@ struct LoginView: View {
                 List {
                     Section {
                         TextField("Username", text: $viewModel.username)
+                            .focused($focusedField, equals: .username)
                             .autocapitalization(.none)
                             .textContentType(.username)
                             .keyboardType(.emailAddress)
                             .submitLabel(.next)
+                            .onSubmit { focusedField = .password }
                         
                         SecureField("Password", text: $viewModel.password)
+                            .focused($focusedField, equals: .password)
                             .textContentType(.password)
                             .submitLabel(.go)
                             .onSubmit { viewModel.login() }
@@ -31,10 +40,20 @@ struct LoginView: View {
                 .scrollDisabled(true)
                 
                 if let errorMessage = viewModel.errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .padding(.top, 10)
+                    HStack(alignment: .firstTextBaseline) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(8)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
+                    .padding(.top, 10)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Error: \(errorMessage)")
                 }
                 
                 Button(action: viewModel.login) {
@@ -60,8 +79,12 @@ struct LoginView: View {
                 Spacer()
             }
             .navigationBarHidden(true)
-            .background(Color(UIColor.systemGroupedBackground)) // Match List background if desired, or keep white
-
+            .background(Color(UIColor.systemGroupedBackground))
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    focusedField = .username
+                }
+            }
         }
     }
 }
