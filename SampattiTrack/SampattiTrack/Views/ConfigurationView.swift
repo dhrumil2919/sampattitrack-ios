@@ -2,13 +2,14 @@ import SwiftUI
 
 struct ConfigurationView: View {
     @State private var apiURL: String = ""
+    @State private var financialYearStartMonth: Int = 4
     @State private var validationError: String? = nil
     @State private var showInsecureWarning: Bool = false
     @Binding var isConfigured: Bool
     
     var body: some View {
         VStack(spacing: 20) {
-            Text("Setup API Endpoint")
+            Text("Setup Configuration")
                 .font(.largeTitle)
                 .fontWeight(.bold)
             
@@ -38,6 +39,14 @@ struct ConfigurationView: View {
                         .foregroundColor(.orange)
                         .font(.caption)
                 }
+
+                Picker("Financial Year Start Month", selection: $financialYearStartMonth) {
+                    ForEach(1...12, id: \.self) { month in
+                        Text(Calendar.current.monthSymbols[month - 1]).tag(month)
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .padding(.vertical, 5)
             }
             .padding()
             
@@ -58,6 +67,12 @@ struct ConfigurationView: View {
             if let saved = UserDefaults.standard.string(forKey: "api_base_url") {
                 apiURL = saved
             }
+
+            let savedMonth = UserDefaults.standard.integer(forKey: "financial_year_start_month")
+            if savedMonth > 0 {
+                financialYearStartMonth = savedMonth
+            }
+
             if apiURL.isEmpty {
                 // Default suggestion for simulator/local dev
                 apiURL = "http://localhost:8080/api/v1"
@@ -90,6 +105,7 @@ struct ConfigurationView: View {
         }
         
         APIClient.shared.baseURL = cleanURL
+        UserDefaults.standard.set(financialYearStartMonth, forKey: "financial_year_start_month")
         isConfigured = true
     }
 }
