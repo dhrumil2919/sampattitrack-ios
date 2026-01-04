@@ -9,8 +9,13 @@ final class DashboardCalculatorTests: XCTestCase {
     var calculator: DashboardCalculator!
 
     override func setUpWithError() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        modelContainer = try ModelContainer(for: SDTransaction.self, SDPosting.self, SDAccount.self, SDTag.self, configurations: config)
+        // Create a named configuration to ensure isolation and prevent default store usage
+        let config = ModelConfiguration(name: "TestConfig", isStoredInMemoryOnly: true)
+
+        // Include all related models to ensure schema consistency
+        // Note: Even if not used directly, if they are part of the schema graph, they should be included.
+        // We include SDUnit as well to be safe, though not strictly related via relationships.
+        modelContainer = try ModelContainer(for: SDTransaction.self, SDPosting.self, SDAccount.self, SDTag.self, SDUnit.self, configurations: config)
         modelContext = modelContainer.mainContext
         calculator = DashboardCalculator(modelContext: modelContext)
     }
