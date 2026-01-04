@@ -13,17 +13,6 @@ class LoginViewModel: ObservableObject {
             return
         }
         
-        // Sentinel: Prevent Denial of Service (DoS) by limiting input length
-        if username.count > 100 {
-            errorMessage = "Username must be 100 characters or fewer"
-            return
-        }
-
-        if password.count > 100 {
-            errorMessage = "Password must be 100 characters or fewer"
-            return
-        }
-
         isLoading = true
         errorMessage = nil
         
